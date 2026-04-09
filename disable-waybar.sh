@@ -94,21 +94,45 @@ else
     warn "Dossier introuvable : $HYPR_DIR"
 fi
 
-# ── 5. Recharger Hyprland (barre quickshell remonte en y=0) ─────────────────
+# ── 5. illogical-impulse : barre en HAUT (pas en bas) ─────────────────────────
+II_CFG="${XDG_CONFIG_HOME:-$HOME/.config}/illogical-impulse/config.json"
+if [[ -f "$II_CFG" ]] && command -v jq &>/dev/null; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        info "[dry-run] jq .bar.bottom = false sur illogical-impulse/config.json"
+    else
+        _tmp=$(mktemp)
+        jq '.bar.bottom = false | .bar.vertical = false' "$II_CFG" > "$_tmp" \
+            && mv "$_tmp" "$II_CFG" \
+            && ok "illogical-impulse : bar.bottom = false (barre collée en haut)"
+    fi
+elif [[ -f "$II_CFG" ]]; then
+    warn "jq absent — vérifie manuellement que \"bar.bottom\" est false dans $II_CFG"
+fi
+
+# ── 6. Recharger Hyprland + redémarrer Quickshell (sinon la barre reste « sous » l’ancienne zone waybar)
 if [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v hyprctl &>/dev/null; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        info "[dry-run] hyprctl reload"
+        info "[dry-run] hyprctl reload + restart quickshell"
     else
         hyprctl reload 2>/dev/null && ok "hyprctl reload" || warn "hyprctl reload (hors session Hyprland ?)"
+        sleep 0.5
+        if systemctl --user restart quickshell.service 2>/dev/null; then
+            ok "quickshell redémarré (systemd) — barre doit être en y=0"
+        else
+            pkill -x qs 2>/dev/null || pkill -x quickshell 2>/dev/null || true
+            sleep 0.5
+            nohup qs -c ii >/dev/null 2>&1 &
+            ok "quickshell relancé (qs -c ii)"
+        fi
         sleep 1
         if hyprctl layers 2>/dev/null | grep -q 'namespace: waybar'; then
-            warn "waybar encore présent dans les layers — relance ce script après reboot ou tue manuellement : pkill waybar"
+            warn "waybar encore présent dans les layers — pkill waybar puis relance ce script"
         else
-            ok "Aucune couche waybar détectée (hyprctl layers)"
+            ok "Aucune couche waybar (hyprctl layers)"
         fi
     fi
 else
-    info "Pas de session Hyprland active — au prochain login waybar ne devrait plus démarrer"
+    info "Pas de session Hyprland active — au prochain login : barre en haut après restart quickshell"
 fi
 
 echo ""

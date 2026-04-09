@@ -311,6 +311,28 @@ done
     fail "Bibata-Modern-Classic curseur absent" "install_pkg:illogical-impulse-bibata-modern-classic-bin"
 
 # =============================================================================
+# SECTION 5b — SHADER & ENV VARIABLES HYPRLAND
+# =============================================================================
+section "SHADER & VARIABLES HYPRLAND"
+
+echo ""
+info "Variable \$XDG_CONFIG_HOME dans custom/env.conf..."
+CUSTOM_ENV="$HOME/.config/hypr/custom/env.conf"
+if [[ -f "$CUSTOM_ENV" ]]; then
+    if grep -q '^\$XDG_CONFIG_HOME' "$CUSTOM_ENV" 2>/dev/null; then
+        pass "\$XDG_CONFIG_HOME défini dans custom/env.conf ✓"
+    else
+        fail "\$XDG_CONFIG_HOME ABSENT de custom/env.conf → erreur shader Hyprland" "fix_xdg_var"
+    fi
+else
+    fail "custom/env.conf MANQUANT → variables XDG non définies" "fix_hypr"
+fi
+
+info "Shader disable.frag..."
+SHADER_FILE="$HOME/.config/hypr/shaders/disable.frag"
+[[ -f "$SHADER_FILE" ]] && pass "disable.frag présent" || fail "disable.frag MANQUANT" "fix_hypr"
+
+# =============================================================================
 # SECTION 6 — SERVICES
 # =============================================================================
 section "SERVICES SYSTEMD"
@@ -319,9 +341,29 @@ echo ""
 systemctl is-enabled sddm &>/dev/null && pass "sddm.service : activé" || \
     fail "sddm.service : non activé" "enable_sddm"
 
-systemctl --user is-enabled quickshell.service &>/dev/null && \
-    pass "quickshell.service (user) : activé" || \
-    info "quickshell.service : non présent (lancé par Hyprland)"
+# Service quickshell
+QS_SERVICE="$HOME/.config/systemd/user/quickshell.service"
+if [[ -f "$QS_SERVICE" ]]; then
+    systemctl --user is-enabled quickshell.service &>/dev/null && \
+        pass "quickshell.service (user) : activé" || \
+        fail "quickshell.service présent mais NON activé" "enable_qs_service"
+else
+    fail "quickshell.service MANQUANT dans ~/.config/systemd/user/" "install_qs_service"
+fi
+
+# Python venv
+VENV_DIR="$HOME/.local/state/quickshell/.venv"
+if [[ -f "$VENV_DIR/bin/activate" ]]; then
+    pass "Python venv end-4 présent ($VENV_DIR)"
+    source "$VENV_DIR/bin/activate" 2>/dev/null
+    py_ok=0
+    python3 -c "import materialyoucolor" 2>/dev/null && py_ok=1
+    deactivate 2>/dev/null
+    [[ $py_ok -eq 1 ]] && pass "materialyoucolor installé dans venv" || \
+        fail "materialyoucolor MANQUANT dans venv (switchwall.sh cassé)" "fix_venv"
+else
+    fail "Python venv manquant → switchwall.sh ne peut pas générer les couleurs" "fix_venv"
+fi
 
 # =============================================================================
 # SECTION 7 — QUICKSHELL DIAGNOSTIC APPROFONDI
@@ -551,6 +593,76 @@ if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_qs_exec"; then
         echo "# Quickshell bar (config ii)" >> "$HYPR_EXECS"
         echo 'exec-once = qs -p $HOME/.config/quickshell/ii' >> "$HYPR_EXECS"
         ok "quickshell ajouté à execs.conf"
+    fi
+fi
+
+# ── Fix : variable $XDG_CONFIG_HOME dans custom/env.conf ─────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_xdg_var"; then
+    fix "Ajout \$XDG_CONFIG_HOME dans custom/env.conf..."
+    CUSTOM_ENV="$HOME/.config/hypr/custom/env.conf"
+    if [[ -f "$CUSTOM_ENV" ]] && ! grep -q '^\$XDG_CONFIG_HOME' "$CUSTOM_ENV" 2>/dev/null; then
+        cat >> "$CUSTOM_ENV" << 'ENVEOF'
+
+# ######## XDG Dirs (requis pour shaders.conf HyDE) #########
+# Sans ces variables, Hyprland affiche: "Screen shader path not found"
+$XDG_CONFIG_HOME = ~/.config
+$XDG_STATE_HOME = ~/.local/state
+$XDG_CACHE_HOME = ~/.cache
+$XDG_DATA_HOME = ~/.local/share
+ENVEOF
+        ok "\$XDG_CONFIG_HOME ajouté → shader Hyprland corrigé"
+        [[ -n "$WAYLAND_DISPLAY" ]] && hyprctl reload 2>/dev/null && ok "Hyprland rechargé"
+    elif [[ ! -f "$CUSTOM_ENV" ]] && [[ -f "$SCRIPT_DIR/config/hypr/custom/env.conf" ]]; then
+        cp "$SCRIPT_DIR/config/hypr/custom/env.conf" "$CUSTOM_ENV"
+        ok "custom/env.conf restauré depuis backup"
+    fi
+fi
+
+# ── Fix : service quickshell ─────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "install_qs_service\|enable_qs_service"; then
+    fix "Installation/activation service quickshell..."
+    mkdir -p "$HOME/.config/systemd/user"
+    QS_SERVICE="$HOME/.config/systemd/user/quickshell.service"
+    if [[ ! -f "$QS_SERVICE" ]] && [[ -f "$SCRIPT_DIR/config/systemd-user/quickshell.service" ]]; then
+        cp "$SCRIPT_DIR/config/systemd-user/quickshell.service" "$QS_SERVICE"
+        ok "quickshell.service copié"
+    elif [[ ! -f "$QS_SERVICE" ]]; then
+        # Créer le service si absent du backup
+        cat > "$QS_SERVICE" << 'SVCEOF'
+[Unit]
+Description=Quickshell
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/qs -c ii
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
+SVCEOF
+        ok "quickshell.service créé"
+    fi
+    systemctl --user daemon-reload
+    systemctl --user enable quickshell.service 2>/dev/null && ok "quickshell.service activé" || warn "enable quickshell: hors session"
+    [[ -n "$WAYLAND_DISPLAY" ]] && systemctl --user start quickshell.service 2>/dev/null && ok "quickshell démarré"
+fi
+
+# ── Fix : Python venv end-4 ───────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_venv"; then
+    fix "Création/réparation venv Python end-4..."
+    VENV_DIR="$HOME/.local/state/quickshell/.venv"
+    mkdir -p "$HOME/.local/state/quickshell"
+    if [[ ! -f "$VENV_DIR/bin/activate" ]]; then
+        python3 -m venv "$VENV_DIR" && ok "Venv créé" || err "Impossible de créer le venv"
+    fi
+    if [[ -f "$VENV_DIR/bin/activate" ]]; then
+        source "$VENV_DIR/bin/activate"
+        pip install --quiet materialyoucolor Pillow 2>/dev/null \
+            && ok "materialyoucolor + Pillow installés dans venv" \
+            || warn "pip install partiel"
+        deactivate
     fi
 fi
 

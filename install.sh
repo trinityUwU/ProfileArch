@@ -454,23 +454,38 @@ if command -v kvantummanager &>/dev/null; then
         || warn "Kvantum: thème non trouvé (sera appliqué manuellement)"
 fi
 
-# ── Quickshell autostart via Hyprland ────────────────────────────────────────
-# Le service systemd n'existe pas toujours — on s'appuie sur hyprland/execs.conf
-# Vérifier que qs est bien dans les execs HyDE
-HYPR_EXECS="$HOME/.config/hypr/hyprland/execs.conf"
-if [[ -f "$HYPR_EXECS" ]]; then
-    if grep -q "quickshell" "$HYPR_EXECS" 2>/dev/null; then
-        ok "quickshell dans hyprland/execs.conf"
-    else
-        warn "quickshell non trouvé dans hyprland/execs.conf"
-        warn "  → Ajouter manuellement : exec-once = qs -p \$HOME/.config/quickshell/ii"
-    fi
+# ── Service systemd quickshell ────────────────────────────────────────────────
+info "Installation service quickshell (systemd user)..."
+mkdir -p "$HOME/.config/systemd/user"
+if [[ -f "$SCRIPT_DIR/config/systemd-user/quickshell.service" ]]; then
+    cp "$SCRIPT_DIR/config/systemd-user/quickshell.service" \
+       "$HOME/.config/systemd/user/quickshell.service"
+    systemctl --user daemon-reload
+    systemctl --user enable --now quickshell.service 2>/dev/null \
+        && ok "Service quickshell installé et activé" \
+        || warn "quickshell.service: enable échoué (hors session graphique = normal)"
+else
+    warn "quickshell.service non trouvé dans backup"
 fi
 
-# Service systemd quickshell (si dispo)
-systemctl --user enable --now quickshell.service 2>/dev/null \
-    && ok "Service quickshell activé" \
-    || info "Pas de service quickshell.service — lancé par Hyprland execs"
+# ── Python venv pour end-4 (switchwall.sh / generate_colors_material.py) ─────
+VENV_DIR="$HOME/.local/state/quickshell/.venv"
+if [[ ! -f "$VENV_DIR/bin/activate" ]]; then
+    info "Création venv Python pour end-4 (switchwall.sh)..."
+    if command -v python3 &>/dev/null && python3 -c "import venv" &>/dev/null; then
+        mkdir -p "$HOME/.local/state/quickshell"
+        python3 -m venv "$VENV_DIR"
+        source "$VENV_DIR/bin/activate"
+        pip install --quiet materialyoucolor Pillow 2>/dev/null \
+            && ok "Venv Python créé : materialyoucolor + Pillow installés" \
+            || warn "pip install partiel (non bloquant)"
+        deactivate
+    else
+        warn "python3/venv non disponible — venv non créé"
+    fi
+else
+    ok "Venv Python déjà en place ($VENV_DIR)"
+fi
 
 # ── xdg-user-dirs ─────────────────────────────────────────────────────────────
 xdg-user-dirs-update 2>/dev/null || true

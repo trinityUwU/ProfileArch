@@ -332,6 +332,18 @@ info "Shader disable.frag..."
 SHADER_FILE="$HOME/.config/hypr/shaders/disable.frag"
 [[ -f "$SHADER_FILE" ]] && pass "disable.frag présent" || fail "disable.frag MANQUANT" "fix_hypr"
 
+info "Shader .compiled.cache.glsl (requis pour decoration:screen_shader)..."
+SHADER_GLSL="$HOME/.config/hypr/shaders/.compiled.cache.glsl"
+[[ -f "$SHADER_GLSL" ]] && pass ".compiled.cache.glsl présent" || fail ".compiled.cache.glsl MANQUANT → bandeau Hyprland" "fix_shader_cache"
+
+info "hyprland.conf source shaders.conf (ordre après custom/env.conf)..."
+HYPR_MAIN="$HOME/.config/hypr/hyprland.conf"
+if [[ -f "$HYPR_MAIN" ]] && grep -qE '^source[[:space:]]*=[[:space:]]*shaders\.conf' "$HYPR_MAIN"; then
+    pass "shaders.conf est sourcé dans hyprland.conf"
+else
+    fail "shaders.conf non sourcé dans hyprland.conf (chemins \$SCREEN_SHADER_* non définis)" "fix_shader_cache"
+fi
+
 # =============================================================================
 # SECTION 6 — SERVICES
 # =============================================================================
@@ -516,6 +528,19 @@ if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_hypr"; then
         rsync -a --backup --suffix=".orig" "$CONFIG_SRC/hypr/" "$HOME/.config/hypr/"
         find "$HOME/.config/hypr" -name "*.sh" -exec chmod +x {} \;
         ok "Hyprland config restaurée"
+    fi
+fi
+
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_shader_cache"; then
+    fix "Shader Hyprland (.compiled.cache.glsl + ordre source)..."
+    if [[ -d "$CONFIG_SRC/hypr/shaders" ]]; then
+        mkdir -p "$HOME/.config/hypr/shaders"
+        rsync -a "$CONFIG_SRC/hypr/shaders/" "$HOME/.config/hypr/shaders/"
+        ok "Répertoire shaders synchronisé depuis le backup"
+    fi
+    if [[ -x "$SCRIPT_DIR/fix-shader-hypr.sh" ]]; then
+        bash "$SCRIPT_DIR/fix-shader-hypr.sh" 2>/dev/null || true
+        ok "fix-shader-hypr.sh exécuté"
     fi
 fi
 

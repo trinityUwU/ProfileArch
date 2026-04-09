@@ -386,4 +386,5 @@ echo "  8. Locale Steam : ${CYAN}en_US.UTF-8${NC} dans /etc/locale.gen + ${CYAN}
 echo "  9. Hyprland : ${CYAN}SDL_VIDEODRIVER=wayland,x11${NC} (pas wayland seul) — mis à jour dans ce dépôt config/hypr/hyprland.conf"
 echo " 10. Un seul Steam à la fois ; pas pendant que install-steam-amd-arch.sh tourne."
 echo " 11. Doc runtime : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime"
+echo " 12. Correctif rapide SDL/locale seul : ${CYAN}bash fix-steam-session-arch.sh${NC} (même dossier que ce script)"
 echo ""

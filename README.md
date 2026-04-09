@@ -55,7 +55,14 @@ install-wpe-manager.sh     ← Installation complète WPE (Wallpaper Engine)
 
 ## Steam + GPU AMD (crash silencieux)
 
-Script dédié : active **[multilib]**, installe **mesa / lib32-mesa**, **vulkan-radeon** (32+64 bits), **bubblewrap**, **steam**, couches Vulkan/SDL2 utiles, diagnostics **runtime / pressure-vessel** (user namespaces), et deux lanceurs :
+**Correctif rapide (Hyprland / SDL / locale)** sans tout réinstaller :
+
+```bash
+bash fix-steam-session-arch.sh           # ajuste hyprland.conf + rappelle locale-gen
+bash fix-steam-session-arch.sh --locale  # idem + sudo locale-gen en_US.UTF-8
+```
+
+**Installation complète** (`install-steam-amd-arch.sh`) : **[multilib]**, **mesa / lib32-mesa**, **vulkan-radeon** (32+64 bits), **bubblewrap**, **steam**, diagnostics **runtime / pressure-vessel**, deux lanceurs :
 
 - **`~/.local/bin/steam-amd`** — wrapper Arch (`/usr/bin/steam`) + runtime Valve (comportement par défaut recommandé par le wiki).
 - **`~/.local/bin/steam-amd-native`** — **`STEAM_RUNTIME=0`** et **`-compat-force-slr off`** (comme [steam-native-runtime](https://aur.archlinux.org/packages/steam-native-runtime/) AUR) si le client plante à cause du runtime / libs mélangées.

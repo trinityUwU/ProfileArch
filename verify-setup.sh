@@ -1,311 +1,534 @@
 #!/usr/bin/env bash
 # =============================================================================
-# verify-setup.sh — Vérification & scanner système TrinityArch
+# verify-setup.sh — Scanner & correcteur système TrinityArch
 # =============================================================================
-# USAGE  : bash verify-setup.sh
-# CIBLE  : Arch Linux + Hyprland + HyDE + end-4/dots-hyprland
-# FONCTION : Scanner système, vérifier configs, installer end-4 si manquant
+# USAGE  : bash verify-setup.sh [--fix] [--fix-quickshell] [--fix-colors]
+#          Sans argument  : scan complet + rapport
+#          --fix          : corrige automatiquement tout ce qui est réparable
+#          --fix-quickshell : corrige uniquement quickshell
+#          --fix-colors   : réapplique la palette violet
 # =============================================================================
 
-set -o pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_SRC="$SCRIPT_DIR/config"
+STATE_SRC="$SCRIPT_DIR/local-state"
+SHARE_SRC="$SCRIPT_DIR/local-share"
 
-# ── Couleurs terminal ─────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 info()    { echo -e "${BLUE}[INFO]${NC}  $*"; }
-ok()      { echo -e "${GREEN}[ OK ]${NC}  $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-err()     { echo -e "${RED}[✗ ]${NC}  $*"; }
+ok()      { echo -e "${GREEN}[ ✓ ]${NC}  $*"; }
+warn()    { echo -e "${YELLOW}[ ⚠ ]${NC}  $*"; }
+err()     { echo -e "${RED}[ ✗ ]${NC}  $*"; }
+fix()     { echo -e "${CYAN}[ FIX]${NC}  $*"; }
+
 section() {
     echo ""
-    echo -e "${BOLD}${CYAN}┌$(printf '─%.0s' {1..48})┐${NC}"
-    echo -e "${BOLD}${CYAN}│  $*$(printf '%*s' $((45 - ${#*})) '')│${NC}"
-    echo -e "${BOLD}${CYAN}└$(printf '─%.0s' {1..48})┘${NC}"
+    echo -e "${BOLD}${CYAN}┌$(printf '─%.0s' {1..54})┐${NC}"
+    printf "${BOLD}${CYAN}│  %-52s│${NC}\n" "$*"
+    echo -e "${BOLD}${CYAN}└$(printf '─%.0s' {1..54})┘${NC}"
 }
 
-# ── Stats globales ─────────────────────────────────────────────────────────────
-TOTAL_CHECKS=0
-PASSED_CHECKS=0
-FAILED_CHECKS=0
-WARNINGS=0
+# ── Mode ──────────────────────────────────────────────────────────────────────
+AUTO_FIX=0
+FIX_QS=0
+FIX_COLORS=0
 
-check() {
-    ((TOTAL_CHECKS++))
-    if [[ $? -eq 0 ]]; then
-        ((PASSED_CHECKS++))
-        ok "$1"
+for arg in "$@"; do
+    case "$arg" in
+        --fix)            AUTO_FIX=1 ;;
+        --fix-quickshell) FIX_QS=1 ;;
+        --fix-colors)     FIX_COLORS=1 ;;
+    esac
+done
+
+[[ "$EUID" -eq 0 ]] && { err "Ne pas lancer en root."; exit 1; }
+
+# ── Compteurs ─────────────────────────────────────────────────────────────────
+CHECKS_OK=0; CHECKS_FAIL=0; CHECKS_WARN=0
+FIXABLE=()   # liste des corrections disponibles
+
+pass()  { ((CHECKS_OK++));   ok "$1"; }
+fail()  { ((CHECKS_FAIL++)); err "$1"; FIXABLE+=("$2"); }
+warn2() { ((CHECKS_WARN++)); warn "$1"; }
+
+# =============================================================================
+# SECTION 1 — SYSTÈME
+# =============================================================================
+section "SYSTÈME"
+
+os=$(grep "^ID=" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
+kernel=$(uname -r)
+arch=$(uname -m)
+[[ "$os" == "arch" ]] && pass "Distribution : Arch Linux" || warn2 "Distribution : $os (non-Arch)"
+ok "Kernel : $kernel | Arch : $arch"
+ok "Utilisateur : $USER (uid=$(id -u)) | HOME : $HOME"
+
+# Wayland/Xorg
+if [[ -n "$WAYLAND_DISPLAY" ]]; then
+    pass "Wayland actif : $WAYLAND_DISPLAY"
+elif [[ -n "$DISPLAY" ]]; then
+    warn2 "Xorg ($DISPLAY) — Wayland recommandé pour Hyprland"
+else
+    info "Pas de display server actif (normal si tty/install)"
+fi
+
+# Hyprland actif ?
+if pgrep -x "hyprland" >/dev/null 2>&1; then
+    pass "Hyprland actif (PID: $(pgrep -x hyprland))"
+else
+    info "Hyprland non actif (normal hors session)"
+fi
+
+# =============================================================================
+# SECTION 2 — PAQUETS
+# =============================================================================
+section "PAQUETS REQUIS"
+
+_pkg_check() {
+    local pkg="$1"; local name="${2:-$1}"
+    if pacman -Qq "$pkg" &>/dev/null; then
+        local ver; ver=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}')
+        pass "$name ($ver)"
         return 0
     else
-        ((FAILED_CHECKS++))
-        err "$1"
+        fail "$name : NOT INSTALLED" "install_pkg:$pkg"
         return 1
     fi
 }
 
-warn_check() {
-    ((WARNINGS++))
-    warn "$1"
+# Composants critiques
+echo ""
+info "Composants Hyprland..."
+_pkg_check hyprland
+_pkg_check hyprlock "Hyprlock"
+_pkg_check hypridle "Hypridle"
+
+echo ""
+info "Interface..."
+_pkg_check sddm "SDDM"
+_pkg_check kitty "Kitty"
+_pkg_check fish "Fish shell"
+
+echo ""
+info "Bar & widgets..."
+if _pkg_check quickshell-git "Quickshell-git"; then
+    :
+elif pacman -Qq quickshell &>/dev/null; then
+    warn2 "quickshell (stable) présent — quickshell-git recommandé pour config ii"
+    FIXABLE+=("upgrade_quickshell")
+else
+    fail "Quickshell : NOT INSTALLED (ni stable ni git)" "install_pkg:quickshell-git"
+fi
+
+echo ""
+info "Outils Wayland..."
+_pkg_check rofi-wayland "Rofi Wayland"   || _pkg_check rofi "Rofi"
+_pkg_check dunst "Dunst"
+_pkg_check wlogout "Wlogout"
+_pkg_check waybar "Waybar"
+
+echo ""
+info "Paquets essentiels..."
+_pkg_check matugen "Matugen"
+_pkg_check jq "jq"
+_pkg_check nwg-displays "nwg-displays"
+_pkg_check nemo "Nemo"
+_pkg_check cliphist "Cliphist"
+_pkg_check electron "Electron"
+
+echo ""
+info "Fonts..."
+_pkg_check ttf-jetbrains-mono-nerd "JetBrains Mono Nerd"
+_pkg_check ttf-material-symbols-variable-git "Material Symbols" || \
+    _pkg_check ttf-material-symbols-variable "Material Symbols (stable)"
+
+echo ""
+info "illogical-impulse..."
+for pkg in illogical-impulse-basic illogical-impulse-fonts-themes \
+           illogical-impulse-bibata-modern-classic-bin illogical-impulse-audio; do
+    _pkg_check "$pkg"
+done
+
+# =============================================================================
+# SECTION 3 — CONFIGS PERSONNALISÉES
+# =============================================================================
+section "CONFIGS PERSONNALISÉES"
+
+_cfg_check() {
+    local path="${1/\~/$HOME}"
+    local desc="$2"
+    local fix_key="${3:-}"
+    if [[ -e "$path" ]]; then
+        pass "$desc"
+        return 0
+    else
+        fail "$desc : MANQUANT ($path)" "$fix_key"
+        return 1
+    fi
 }
 
-# ── Vérifications ─────────────────────────────────────────────────────────────
-[[ "$EUID" -eq 0 ]] && { err "Ne pas lancer en root."; exit 1; }
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_SRC="$SCRIPT_DIR/config"
-
-section "🔍 SCANNER SYSTÈME"
 echo ""
+info "Hyprland..."
+_cfg_check "~/.config/hypr/hyprland.conf"          "hyprland.conf"         "fix_hypr"
+_cfg_check "~/.config/hypr/custom/general.conf"    "custom/general.conf"   "fix_hypr"
+_cfg_check "~/.config/hypr/custom/rules.conf"      "custom/rules.conf"     "fix_hypr"
+_cfg_check "~/.config/hypr/custom/execs.conf"      "custom/execs.conf"     "fix_hypr"
+_cfg_check "~/.config/hypr/custom/env.conf"        "custom/env.conf"       "fix_hypr"
+_cfg_check "~/.config/hypr/custom/keybinds.conf"   "custom/keybinds.conf"  "fix_hypr"
+_cfg_check "~/.config/hypr/monitors.conf"          "monitors.conf"         "fix_hypr"
 
-# === INFO SYSTÈME ===
-info "OS & Kernel"
-os_name=$(grep "^ID=" /etc/os-release | cut -d= -f2 | tr -d '"')
-kernel=$(uname -r)
-ok "Distribution : $os_name"
-ok "Kernel : $kernel"
-
-# === DISPLAY & WM ===
-section "🖥️  AFFICHAGE & GESTIONNAIRE FENÊTRES"
 echo ""
+info "Quickshell..."
+_cfg_check "~/.config/quickshell/ii/shell.qml"     "quickshell/ii/shell.qml"    "fix_quickshell"
+_cfg_check "~/.config/quickshell/ii/settings.qml"  "quickshell/ii/settings.qml" "fix_quickshell"
+_cfg_check "~/.config/quickshell/ii/GlobalStates.qml" "quickshell/ii/GlobalStates.qml" "fix_quickshell"
 
-info "Vérification Display Server..."
-if [[ -n "$WAYLAND_DISPLAY" ]]; then
-    ok "Wayland actif : $WAYLAND_DISPLAY"
-elif [[ -n "$DISPLAY" ]]; then
-    warn_check "Xorg détecté ($DISPLAY) — Wayland recommandé pour Hyprland"
-else
-    err "Aucun display server détecté"
-fi
-
-info "Vérification WM..."
-if pgrep -x "hyprland" >/dev/null 2>&1; then
-    wm_pid=$(pgrep -x "hyprland")
-    ok "Hyprland actif (PID: $wm_pid)"
-else
-    warn_check "Hyprland non actif (peut être normal si pas en session)"
-fi
-
-# === COMPONENTS PRINCIPAUX ===
-section "📦 COMPOSANTS PRINCIPAUX"
 echo ""
-
-declare -a components=(
-    "hyprland:Hyprland (WM)"
-    "hyprlock:Hyprlock (Lock screen)"
-    "hypridle:Hypridle (Idle manager)"
-    "sddm:SDDM (Display Manager)"
-    "kitty:Kitty (Terminal)"
-    "fish:Fish shell"
-    "rofi:Rofi (Launcher)"
-    "dunst:Dunst (Notifications)"
-    "quickshell:Quickshell (Bar)"
-    "wlogout:Wlogout (Logout menu)"
-)
-
-for comp in "${components[@]}"; do
-    pkg="${comp%%:*}"
-    name="${comp##*:}"
-    
-    if command -v "$pkg" &>/dev/null || pacman -Q "$pkg" >/dev/null 2>&1; then
-        version=$(command -v "$pkg" >/dev/null && $pkg --version 2>/dev/null | head -1)
-        [[ -z "$version" ]] && version=$(pacman -Q "$pkg" 2>/dev/null | cut -d' ' -f2)
-        ok "$name : $version"
+info "Couleurs Material You (violet)..."
+COLORS_FILE="$HOME/.local/state/quickshell/user/generated/colors.json"
+if [[ -f "$COLORS_FILE" ]]; then
+    # Vérifier que c'est bien notre palette violet
+    if grep -q '"primary": "#9d6ff5"' "$COLORS_FILE" 2>/dev/null; then
+        pass "colors.json — palette violet (#9d6ff5) ✓"
     else
-        err "$name : ❌ NOT FOUND"
+        primary=$(grep '"primary"' "$COLORS_FILE" 2>/dev/null | head -1 | tr -d ' ",' | cut -d: -f2)
+        warn2 "colors.json présent mais palette différente (primary: $primary)"
+        warn2 "  → Attendu : #9d6ff5"
+        FIXABLE+=("fix_colors")
     fi
-done
+else
+    fail "colors.json MANQUANT" "fix_colors"
+fi
 
-# === THÈMES & ICÔNES ===
-section "🎨 THÈMES & ICÔNES"
+SCSS_FILE="$HOME/.local/state/quickshell/user/generated/material_colors.scss"
+[[ -f "$SCSS_FILE" ]] && pass "material_colors.scss présent" || fail "material_colors.scss MANQUANT" "fix_colors"
+
 echo ""
+info "Autres configs..."
+_cfg_check "~/.config/kitty/kitty.conf"    "kitty.conf"   "fix_kitty"
+_cfg_check "~/.config/rofi/theme.rasi"     "rofi theme"   "fix_rofi"
+_cfg_check "~/.config/dunst/dunstrc"       "dunstrc"      "fix_dunst"
+_cfg_check "~/.config/wlogout/style.css"   "wlogout style" "fix_wlogout"
+_cfg_check "~/.config/gtk-3.0/settings.ini" "gtk-3.0"     "fix_gtk"
+_cfg_check "~/.config/Kvantum/kvantum.kvconfig" "Kvantum"  "fix_kvantum"
 
-info "Thèmes GTK..."
-gtk_themes=("$HOME/.local/share/themes" "/usr/share/themes")
-found_catppuccin=0
-
-for dir in "${gtk_themes[@]}"; do
-    if [[ -d "$dir" ]] && find "$dir" -name "*atppuccin*" -o -name "*Catppuccin*" 2>/dev/null | grep -q .; then
-        found_catppuccin=1
-        ok "Catppuccin GTK trouvé"
-        break
-    fi
-done
-
-[[ $found_catppuccin -eq 0 ]] && err "Catppuccin GTK non trouvé"
-
-info "Thèmes icônes..."
-icon_themes=("$HOME/.local/share/icons" "/usr/share/icons")
-found_tela=0
-
-for dir in "${icon_themes[@]}"; do
-    if [[ -d "$dir" ]] && find "$dir" -name "*ela*" -o -name "*dracula*" 2>/dev/null | grep -q .; then
-        found_tela=1
-        ok "Tela/Dracula icônes trouvé"
-        break
-    fi
-done
-
-[[ $found_tela -eq 0 ]] && err "Tela/Dracula icônes non trouvé"
-
-# === CONFIGURATIONS CUSTOM ===
-section "⚙️  CONFIGURATIONS CUSTOM"
 echo ""
+info "HyDE..."
+_cfg_check "~/.config/hyde/config.toml"    "hyde config.toml" "fix_hyde"
+_cfg_check "~/.local/share/hyde"           "~/.local/share/hyde" "fix_hyde"
 
-declare -a config_paths=(
-    "~/.config/hypr/custom/general.conf:Hyprland custom (general)"
-    "~/.config/hypr/custom/rules.conf:Hyprland custom (rules)"
-    "~/.config/quickshell/ii:Quickshell bar (ii)"
-    "~/.config/kitty:Kitty configuration"
-    "~/.config/fish:Fish shell config"
-    "~/.config/gtk-3.0:GTK 3 theme"
-    "~/.config/gtk-4.0:GTK 4 theme"
-    "~/.config/rofi:Rofi config"
-    "~/.config/dunst:Dunst config"
-    "~/.config/wlogout:Wlogout config"
-    "~/.local/share/hyde:HyDE data"
-    "~/.local/state/quickshell/user/generated:Quickshell colors"
-)
+# =============================================================================
+# SECTION 4 — PERMISSIONS SCRIPTS
+# =============================================================================
+section "PERMISSIONS SCRIPTS"
 
-for path_info in "${config_paths[@]}"; do
-    path="${path_info%%:*}"
-    desc="${path_info##*:}"
-    expanded_path="${path/\~/$HOME}"
-    
-    if [[ -e "$expanded_path" ]]; then
-        ok "$desc"
+echo ""
+SCRIPTS_WRONG=0
+while IFS= read -r -d '' sh; do
+    if [[ ! -x "$sh" ]]; then
+        ((SCRIPTS_WRONG++))
+        warn2 "Non-exécutable : $sh"
+    fi
+done < <(find "$HOME/.config/hypr" "$HOME/.config/quickshell" \
+              -name "*.sh" -print0 2>/dev/null)
+
+if [[ $SCRIPTS_WRONG -eq 0 ]]; then
+    pass "Tous les scripts .sh sont exécutables"
+else
+    fail "$SCRIPTS_WRONG scripts sans permission +x" "fix_perms"
+fi
+
+# =============================================================================
+# SECTION 5 — GTK / THÈMES / CURSEUR
+# =============================================================================
+section "THÈMES & CURSEUR"
+
+echo ""
+# GTK
+gtk_theme=$(gsettings get org.gnome.desktop.interface gtk-theme 2>/dev/null | tr -d "'")
+icon_theme=$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null | tr -d "'")
+cursor_theme=$(gsettings get org.gnome.desktop.interface cursor-theme 2>/dev/null | tr -d "'")
+
+[[ "$gtk_theme" == "Catppuccin-Mocha"* ]] && pass "GTK theme : $gtk_theme" || \
+    fail "GTK theme : $gtk_theme (attendu: Catppuccin-Mocha)" "fix_gtk"
+
+[[ "$icon_theme" == "Tela-circle-dracula"* ]] && pass "Icon theme : $icon_theme" || \
+    fail "Icon theme : $icon_theme (attendu: Tela-circle-dracula)" "fix_gtk"
+
+[[ "$cursor_theme" == "Bibata-Modern-Classic"* ]] && pass "Cursor theme : $cursor_theme" || \
+    fail "Cursor theme : $cursor_theme (attendu: Bibata-Modern-Classic)" "fix_gtk"
+
+# Thème GTK sur le FS
+found_ctpk=0
+for d in "$HOME/.local/share/themes" "/usr/share/themes"; do
+    [[ -d "$d" ]] && ls "$d" 2>/dev/null | grep -qi "catppuccin" && { found_ctpk=1; break; }
+done
+[[ $found_ctpk -eq 1 ]] && pass "Catppuccin GTK installé sur le FS" || \
+    fail "Catppuccin GTK absent du FS" "install_pkg:catppuccin-gtk-theme-mocha"
+
+# Bibata curseur
+found_bibata=0
+for d in "$HOME/.local/share/icons" "/usr/share/icons"; do
+    [[ -d "$d/Bibata-Modern-Classic" ]] && { found_bibata=1; break; }
+done
+[[ $found_bibata -eq 1 ]] && pass "Bibata-Modern-Classic curseur installé" || \
+    fail "Bibata-Modern-Classic curseur absent" "install_pkg:illogical-impulse-bibata-modern-classic-bin"
+
+# =============================================================================
+# SECTION 6 — SERVICES
+# =============================================================================
+section "SERVICES SYSTEMD"
+
+echo ""
+systemctl is-enabled sddm &>/dev/null && pass "sddm.service : activé" || \
+    fail "sddm.service : non activé" "enable_sddm"
+
+systemctl --user is-enabled quickshell.service &>/dev/null && \
+    pass "quickshell.service (user) : activé" || \
+    info "quickshell.service : non présent (lancé par Hyprland)"
+
+# =============================================================================
+# SECTION 7 — QUICKSHELL DIAGNOSTIC APPROFONDI
+# =============================================================================
+section "QUICKSHELL DIAGNOSTIC"
+
+echo ""
+QS_II="$HOME/.config/quickshell/ii"
+QS_SCRIPTS="$QS_II/scripts/colors/applycolor.sh"
+
+[[ -d "$QS_II" ]] && pass "Répertoire quickshell/ii présent" || \
+    fail "Répertoire quickshell/ii ABSENT" "fix_quickshell"
+
+[[ -f "$QS_SCRIPTS" ]] && pass "applycolor.sh présent" || \
+    fail "applycolor.sh ABSENT" "fix_quickshell"
+
+[[ -x "$QS_SCRIPTS" ]] && pass "applycolor.sh exécutable" || {
+    fail "applycolor.sh non exécutable" "fix_perms"
+}
+
+# Vérifier que $qsConfig est bien "ii" dans hyprland.conf
+HYPR_MAIN="$HOME/.config/hypr/hyprland.conf"
+if [[ -f "$HYPR_MAIN" ]]; then
+    if grep -q 'qsConfig = ii' "$HYPR_MAIN" 2>/dev/null; then
+        pass 'hyprland.conf : $qsConfig = ii ✓'
     else
-        err "$desc : MISSING"
+        fail 'hyprland.conf : $qsConfig != ii (mauvaise config bar)' "fix_hypr"
     fi
-done
-
-# === HyDE & end-4/dots-hyprland ===
-section "🎭 HyDE & end-4/dots-hyprland"
-echo ""
-
-info "Vérification HyDE..."
-if command -v hyde-shell &>/dev/null || [[ -f "$HOME/.local/bin/hyde-shell" ]]; then
-    ok "HyDE installé"
-else
-    err "HyDE NOT INSTALLED"
 fi
 
-info "Vérification end-4/dots-hyprland..."
-end4_dir="$HOME/.config/hyde/themes/illogical-impulse"
-if [[ -d "$end4_dir" ]]; then
-    ok "end-4/dots-hyprland trouvé ($end4_dir)"
-    file_count=$(find "$end4_dir" -type f | wc -l)
-    ok "  └─ $file_count fichiers présents"
-else
-    err "end-4/dots-hyprland NOT FOUND"
-    warn_check "  └─ Installation recommandée"
-fi
-
-# === PALETTE COULEURS ===
-section "🎨 PALETTE COULEURS (Material You Violet)"
-echo ""
-
-colors_file="$HOME/.local/state/quickshell/user/generated/colors.json"
-if [[ -f "$colors_file" ]]; then
-    ok "colors.json présent"
-    # Vérifier quelques couleurs clés
-    if grep -q "#9d6ff5\|#0d0b14" "$colors_file" 2>/dev/null; then
-        ok "Couleurs personnalisées détectées"
+# Vérifier que quickshell est lancé dans execs
+HYPR_EXECS="$HOME/.config/hypr/hyprland/execs.conf"
+if [[ -f "$HYPR_EXECS" ]]; then
+    if grep -q "quickshell\|qs " "$HYPR_EXECS" 2>/dev/null; then
+        pass "quickshell dans hyprland/execs.conf ✓"
     else
-        warn_check "Palette couleurs différente du backup original"
+        fail "quickshell absent de hyprland/execs.conf" "fix_qs_exec"
     fi
-else
-    err "colors.json NOT FOUND"
 fi
 
-# === DOTFILES INSTALLÉS ===
-section "📁 DOTFILES PERSONNALISÉS"
-echo ""
-
-info "Comparaison dotfiles backup vs ~/.config..."
-
-config_dirs=("hypr" "kitty" "quickshell" "rofi" "waybar" "dunst" "gtk-3.0" "gtk-4.0" "Kvantum" "wlogout")
-configs_found=0
-
-for dir in "${config_dirs[@]}"; do
-    src="$CONFIG_SRC/$dir"
-    dst="$HOME/.config/$dir"
-    
-    if [[ -d "$src" && -d "$dst" ]]; then
-        ((configs_found++))
-        file_count=$(find "$dst" -type f 2>/dev/null | wc -l)
-        ok "$dir : $file_count fichiers"
-    elif [[ -d "$src" ]]; then
-        err "$dir : backup existe mais PAS copié"
-    fi
-done
-
-info "Total configs trouvées : $configs_found/10"
-
-# === APPS CUSTOM ===
-section "🚀 APPS PERSONNALISÉES"
-echo ""
-
-if [[ -d "$SCRIPT_DIR/apps/wpe-manager" ]]; then
-    ok "wpe-manager (Wallpaper Engine Manager) trouvé"
-    [[ -d "$HOME/.local/bin" ]] && ok "  └─ ~/.local/bin accessible"
-else
-    warn_check "wpe-manager non trouvé"
-fi
-
-# === RÉSUMÉ ===
-section "📊 RÉSUMÉ VÉRIFICATION"
-echo ""
-
-passed_pct=$((PASSED_CHECKS * 100 / TOTAL_CHECKS))
-failed_pct=$((FAILED_CHECKS * 100 / TOTAL_CHECKS))
-
-echo -e "  ${GREEN}✓ Réussis${NC}   : $PASSED_CHECKS/$TOTAL_CHECKS"
-echo -e "  ${RED}✗ Échoués${NC}    : $FAILED_CHECKS/$TOTAL_CHECKS"
-[[ $WARNINGS -gt 0 ]] && echo -e "  ${YELLOW}⚠ Avertissements${NC} : $WARNINGS"
+# =============================================================================
+# RAPPORT FINAL
+# =============================================================================
+section "RAPPORT"
 
 echo ""
-[[ $FAILED_CHECKS -eq 0 ]] && ok "Tous les checks sont passés ! ✨" || err "$FAILED_CHECKS checks échoués"
+TOTAL=$((CHECKS_OK + CHECKS_FAIL + CHECKS_WARN))
+echo -e "  ${GREEN}✓ Réussis    : $CHECKS_OK${NC}"
+echo -e "  ${RED}✗ Échecs     : $CHECKS_FAIL${NC}"
+echo -e "  ${YELLOW}⚠ Avertiss. : $CHECKS_WARN${NC}"
+echo -e "  Total checks : $TOTAL"
 
-# === PROPOSITION INSTALLATION end-4 ===
-if [[ ! -d "$end4_dir" ]]; then
+if [[ $CHECKS_FAIL -eq 0 ]]; then
     echo ""
-    echo -e "${YELLOW}════════════════════════════════════════════════════${NC}"
-    read -rp "$(echo -e "${BOLD}Installer end-4/dots-hyprland maintenant ? [o/N] ${NC}")" confirm
-    
-    if [[ "$confirm" =~ ^[oOyY]$ ]]; then
-        section "📥 INSTALLATION end-4/dots-hyprland"
-        echo ""
-        
-        info "Création du répertoire HyDE themes..."
-        mkdir -p "$HOME/.config/hyde/themes"
-        
-        info "Clonage du repo end-4/dots-hyprland..."
-        git clone https://github.com/end-4/dots-hyprland "$end4_dir" 2>&1 | grep -E "(Cloning|Receiving|Resolving)" || true
-        
-        if [[ -d "$end4_dir" ]]; then
-            ok "end-4/dots-hyprland cloné avec succès"
-            file_count=$(find "$end4_dir" -type f | wc -l)
-            ok "  └─ $file_count fichiers"
-            
-            info "Copie des configs end-4 (optionnel)..."
-            # Copier les wallpapers si disponibles
-            [[ -d "$end4_dir/wallpapers" ]] && cp -r "$end4_dir/wallpapers" "$HOME/.config/hyde/" && ok "Wallpapers copiés"
-            
-            # Copier configs modulaires
-            [[ -d "$end4_dir/config" ]] && cp -r "$end4_dir/config"/* "$HOME/.config/" 2>/dev/null && ok "Configs end-4 appliquées"
-            
-            echo ""
-            ok "Installation end-4 terminée !"
-            echo -e "${CYAN}ℹ Redémarrez Hyprland pour appliquer : Super+Q puis reconnectez${NC}"
-        else
-            err "Impossible de cloner end-4"
-        fi
-    fi
+    echo -e "${GREEN}${BOLD}  ✨ Tout est en ordre !${NC}"
+    exit 0
 fi
 
 echo ""
-section "✅ VÉRIFICATION TERMINÉE"
+echo -e "${YELLOW}Corrections disponibles :${NC}"
+echo -e "  ${CYAN}bash verify-setup.sh --fix${NC}             → tout corriger automatiquement"
+echo -e "  ${CYAN}bash verify-setup.sh --fix-quickshell${NC}  → corriger quickshell seulement"
+echo -e "  ${CYAN}bash verify-setup.sh --fix-colors${NC}      → réappliquer palette violet"
+
+# =============================================================================
+# CORRECTIONS AUTOMATIQUES
+# =============================================================================
+
+if [[ "$AUTO_FIX" -eq 0 && "$FIX_QS" -eq 0 && "$FIX_COLORS" -eq 0 ]]; then
+    echo ""
+    read -rp "$(echo -e "${BOLD}Lancer les corrections maintenant ? [o/N] ${NC}")" do_fix
+    [[ "$do_fix" =~ ^[oOyY]$ ]] && AUTO_FIX=1
+fi
+
+[[ "$AUTO_FIX" -eq 0 && "$FIX_QS" -eq 0 && "$FIX_COLORS" -eq 0 ]] && exit 0
+
+section "CORRECTIONS EN COURS"
+
+# ── Fix : permissions scripts ──────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_perms"; then
+    fix "Correction des permissions +x..."
+    find "$HOME/.config/hypr"       -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+    find "$HOME/.config/quickshell" -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+    find "$HOME/.config/hyde"       -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+    ok "Permissions corrigées"
+fi
+
+# ── Fix : quickshell config ────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 || "$FIX_QS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_quickshell"; then
+    fix "Restauration config quickshell/ii depuis backup..."
+    if [[ -d "$CONFIG_SRC/quickshell/ii" ]]; then
+        mkdir -p "$HOME/.config/quickshell"
+        rsync -a --backup --suffix=".orig" "$CONFIG_SRC/quickshell/ii/" "$HOME/.config/quickshell/ii/"
+        find "$HOME/.config/quickshell" -name "*.sh" -exec chmod +x {} \;
+        ok "quickshell/ii restauré"
+    else
+        err "Source quickshell/ii introuvable dans le backup"
+    fi
+fi
+
+# ── Fix : couleurs violet ──────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 || "$FIX_COLORS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_colors"; then
+    fix "Restauration palette violet Material You..."
+    mkdir -p "$HOME/.local/state/quickshell/user/generated"
+    if [[ -d "$STATE_SRC/quickshell-generated" ]]; then
+        cp "$STATE_SRC/quickshell-generated/"* \
+            "$HOME/.local/state/quickshell/user/generated/" 2>/dev/null
+        ok "colors.json violet restauré"
+    fi
+    APPLYCOLOR="$HOME/.config/quickshell/ii/scripts/colors/applycolor.sh"
+    if [[ -f "$APPLYCOLOR" ]]; then
+        bash "$APPLYCOLOR" 2>/dev/null && ok "Palette appliquée via applycolor.sh" || warn "applycolor.sh erreur"
+    fi
+fi
+
+# ── Fix : configs hypr ────────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_hypr"; then
+    fix "Restauration config hyprland..."
+    if [[ -d "$CONFIG_SRC/hypr" ]]; then
+        rsync -a --backup --suffix=".orig" "$CONFIG_SRC/hypr/" "$HOME/.config/hypr/"
+        find "$HOME/.config/hypr" -name "*.sh" -exec chmod +x {} \;
+        ok "Hyprland config restaurée"
+    fi
+fi
+
+# ── Fix : kitty ───────────────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_kitty"; then
+    [[ -d "$CONFIG_SRC/kitty" ]] && {
+        fix "Restauration config kitty..."
+        rsync -a --backup --suffix=".orig" "$CONFIG_SRC/kitty/" "$HOME/.config/kitty/"
+        ok "Kitty config restaurée"
+    }
+fi
+
+# ── Fix : rofi / dunst / wlogout ──────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]]; then
+    for app in rofi dunst wlogout waybar; do
+        [[ -d "$CONFIG_SRC/$app" ]] && {
+            fix "Restauration $app..."
+            rsync -a --backup --suffix=".orig" "$CONFIG_SRC/$app/" "$HOME/.config/$app/"
+            ok "$app restauré"
+        }
+    done
+fi
+
+# ── Fix : GTK gsettings ───────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_gtk"; then
+    fix "Réapplication des thèmes GTK..."
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+    gsettings set org.gnome.desktop.interface gtk-theme     "Catppuccin-Mocha"       2>/dev/null || true
+    gsettings set org.gnome.desktop.interface icon-theme    "Tela-circle-dracula"    2>/dev/null || true
+    gsettings set org.gnome.desktop.interface cursor-theme  "Bibata-Modern-Classic"  2>/dev/null || true
+    gsettings set org.gnome.desktop.interface color-scheme  "prefer-dark"            2>/dev/null || true
+    gsettings set org.gnome.desktop.interface font-name     "JetBrains Mono 11"      2>/dev/null || true
+    ok "GTK/icônes/curseur réappliqués"
+
+    # Aussi dans les fichiers gtk settings.ini
+    for v in 3.0 4.0; do
+        GSET="$HOME/.config/gtk-$v/settings.ini"
+        if [[ -f "$GSET" ]]; then
+            sed -i "s/gtk-theme-name=.*/gtk-theme-name=Catppuccin-Mocha/" "$GSET"
+            sed -i "s/gtk-icon-theme-name=.*/gtk-icon-theme-name=Tela-circle-dracula/" "$GSET"
+            sed -i "s/gtk-cursor-theme-name=.*/gtk-cursor-theme-name=Bibata-Modern-Classic/" "$GSET"
+            ok "gtk-$v/settings.ini mis à jour"
+        fi
+    done
+fi
+
+# ── Fix : HyDE config ─────────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_hyde"; then
+    fix "Restauration config HyDE..."
+    mkdir -p "$HOME/.config/hyde/themes"
+    [[ -f "$CONFIG_SRC/hyde-config.toml" ]] && \
+        cp "$CONFIG_SRC/hyde-config.toml" "$HOME/.config/hyde/config.toml"
+    [[ -d "$CONFIG_SRC/hyde-wallbash" ]] && \
+        rsync -a --backup --suffix=".orig" "$CONFIG_SRC/hyde-wallbash/" "$HOME/.config/hyde/wallbash/"
+    if [[ -d "$CONFIG_SRC/hyde-themes" ]]; then
+        for td in "$CONFIG_SRC/hyde-themes/"/*/; do
+            tname=$(basename "$td")
+            mkdir -p "$HOME/.config/hyde/themes/$tname"
+            rsync -a "$td" "$HOME/.config/hyde/themes/$tname/" 2>/dev/null
+        done
+    fi
+    [[ -d "$SHARE_SRC/hyde" ]] && {
+        mkdir -p "$HOME/.local/share/hyde"
+        rsync -a "$SHARE_SRC/hyde/" "$HOME/.local/share/hyde/"
+    }
+    ok "HyDE config restaurée"
+fi
+
+# ── Fix : quickshell dans execs.conf ──────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_qs_exec"; then
+    HYPR_EXECS="$HOME/.config/hypr/hyprland/execs.conf"
+    if [[ -f "$HYPR_EXECS" ]] && ! grep -q "quickshell\|qs " "$HYPR_EXECS" 2>/dev/null; then
+        fix "Ajout de quickshell dans execs.conf..."
+        echo "" >> "$HYPR_EXECS"
+        echo "# Quickshell bar (config ii)" >> "$HYPR_EXECS"
+        echo 'exec-once = qs -p $HOME/.config/quickshell/ii' >> "$HYPR_EXECS"
+        ok "quickshell ajouté à execs.conf"
+    fi
+fi
+
+# ── Fix : SDDM ────────────────────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "enable_sddm"; then
+    fix "Activation SDDM..."
+    sudo systemctl enable sddm 2>/dev/null && ok "sddm activé" || warn "sddm enable échoué"
+fi
+
+# ── Fix : paquets manquants ───────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]]; then
+    echo ""
+    fix "Vérification paquets manquants..."
+    MISSING_PKGS=()
+    for item in "${FIXABLE[@]}"; do
+        [[ "$item" == install_pkg:* ]] && MISSING_PKGS+=("${item#install_pkg:}")
+    done
+    if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+        fix "Installation : ${MISSING_PKGS[*]}"
+        yay -S --needed --noconfirm --answerdiff=None --answerclean=None "${MISSING_PKGS[@]}" \
+            && ok "Paquets installés" || warn "Certains paquets ont échoué"
+    else
+        ok "Aucun paquet manquant à installer"
+    fi
+fi
+
+# =============================================================================
+# RÉSUMÉ FINAL DES CORRECTIONS
+# =============================================================================
 echo ""
-info "Pour plus de détails, consultez le README.md"
-info "Pour reconfigurer : bash verify-setup.sh"
+section "CORRECTIONS TERMINÉES"
+echo ""
+ok "Toutes les corrections automatiques ont été appliquées."
+echo ""
+echo -e "${CYAN}Relance le scanner pour vérifier :${NC}"
+echo -e "  bash verify-setup.sh"
+echo ""
+
+if pgrep -x "hyprland" >/dev/null 2>&1; then
+    echo -e "${YELLOW}Recharge Hyprland pour appliquer les changements :${NC}"
+    echo -e "  ${CYAN}hyprctl reload${NC}           → recharger config Hyprland"
+    echo -e "  ${CYAN}pkill quickshell${NC}          → redémarrer quickshell"
+    echo -e "  ${CYAN}dunstctl reload${NC}            → recharger dunst"
+fi
 echo ""

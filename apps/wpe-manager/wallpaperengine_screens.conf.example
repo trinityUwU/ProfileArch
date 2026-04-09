@@ -1,0 +1,8 @@
+# Copié vers ~/.config/wallpaperengine_screens.conf par install-wpe-manager.sh
+# Format : NOM_ECRAN_HYPR=id_workshop (vide après = = aucun fond sur cet écran)
+# Liste des écrans : hyprctl monitors
+# Workshop WE : ~/.local/share/Steam/steamapps/workshop/content/431960/<id>/
+#
+# Exemple (remplace par tes IDs après abonnement Steam) :
+# DP-1=2951143760
+# HDMI-A-1=780034130

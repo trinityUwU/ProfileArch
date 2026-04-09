@@ -48,7 +48,20 @@ dotfiles-backup/
 │       └── material_colors.scss
 └── local-share/
     └── hyde/              ← Données partagées HyDE
+install-wpe-manager.sh     ← Installation complète WPE (Wallpaper Engine)
 ```
+
+---
+
+## WPE Manager (Wallpaper Engine)
+
+Installe les paquets (Python, Electron, mpvpaper, GTK/WebKit pour les fonds HTML), copie `apps/wpe-manager` vers `~/wpe-manager`, crée `~/.config/wallpaperengine_screens.conf`, le lanceur menu et vérifie le dossier Steam workshop.
+
+```bash
+bash install-wpe-manager.sh
+```
+
+Options : `--deps-only`, `--skip-deps`. Intégré automatiquement à la fin de `install.sh` (sans reposer les paquets déjà gérés à l’étape 4). Documentation : `apps/wpe-manager/README.md`.
 
 ---
 

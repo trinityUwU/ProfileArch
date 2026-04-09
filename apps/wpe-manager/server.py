@@ -9,7 +9,26 @@ from urllib.parse import urlparse, unquote
 WORKSHOP  = Path.home() / ".local/share/Steam/steamapps/workshop/content/431960"
 CONF      = Path.home() / ".config/wallpaperengine_screens.conf"
 RESTORE   = Path.home() / ".config/hypr/custom/scripts/__restore_video_wallpaper.sh"
-SCREENS   = ["DP-1", "HDMI-A-1"]
+
+
+def _detect_screens():
+    """Ordre : WPE_SCREENS (csv) → hyprctl monitors → défaut dual-head."""
+    env = os.environ.get("WPE_SCREENS", "").strip()
+    if env:
+        return [s.strip() for s in env.split(",") if s.strip()]
+    try:
+        out = subprocess.check_output(
+            ["hyprctl", "monitors", "-j"], text=True, timeout=3
+        )
+        names = [m["name"] for m in json.loads(out) if m.get("name")]
+        if names:
+            return names
+    except Exception:
+        pass
+    return ["DP-1", "HDMI-A-1"]
+
+
+SCREENS = _detect_screens()
 PORT      = 6969
 MPV_OPTS  = "no-audio loop hwdec=auto scale=bilinear interpolation=no video-sync=display-resample panscan=1.0"
 

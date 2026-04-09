@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=WPE Manager
+Name[fr]=WPE Manager
+Comment=Wallpaper Engine (Steam) — mpvpaper / web / scenes
+Exec=/usr/bin/electron %h/wpe-manager/electron/main.js --no-sandbox
+Icon=%h/wpe-manager/electron/icon.png
+Terminal=false
+Type=Application
+Categories=Utility;AudioVideo;
+StartupNotify=true

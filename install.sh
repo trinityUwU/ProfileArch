@@ -173,11 +173,16 @@ EXTRA_PKGS=(
     quickshell-git
     matugen
     mpvpaper
+    ffmpeg
     nwg-displays
     nwg-look
     ttf-material-symbols-variable-git
     ttf-jetbrains-mono-nerd
     electron
+    gtk3
+    webkit2gtk
+    python-gobject
+    libnotify
     wl-clip-persist
     cliphist
     jq
@@ -306,15 +311,12 @@ if [[ -d "$SHARE_SRC/hyde" ]]; then
     rsync -a "$SHARE_SRC/hyde/" "$HOME/.local/share/hyde/" 2>/dev/null && ok "  local-share/hyde"
 fi
 
-# ── wpe-manager ───────────────────────────────────────────────────────────────
-if [[ -d "$APPS_SRC/wpe-manager" ]]; then
-    info "wpe-manager → ~/wpe-manager"
-    mkdir -p "$HOME/wpe-manager"
-    rsync -a --backup --suffix=".orig" "$APPS_SRC/wpe-manager/" "$HOME/wpe-manager/"
-    chmod +x "$HOME/wpe-manager/launch.sh"         2>/dev/null || true
-    chmod +x "$HOME/wpe-manager/server.py"         2>/dev/null || true
-    chmod +x "$HOME/wpe-manager/wpe_web_wallpaper.py" 2>/dev/null || true
-    ok "wpe-manager installé dans ~/wpe-manager"
+# ── wpe-manager (Wallpaper Engine) — script dédié ─────────────────────────────
+if [[ -x "$SCRIPT_DIR/install-wpe-manager.sh" ]]; then
+    info "WPE Manager (apps + conf + .desktop)..."
+    WPE_NONINTERACTIVE=1 bash "$SCRIPT_DIR/install-wpe-manager.sh" --skip-deps
+else
+    warn "install-wpe-manager.sh manquant — copie manuelle depuis apps/wpe-manager/"
 fi
 
 # =============================================================================

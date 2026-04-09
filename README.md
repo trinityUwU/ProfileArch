@@ -69,6 +69,12 @@ bash install-steam-amd-arch.sh --with-aur-native  # + steam-native-runtime (yay/
 
 Journaux : `~/.local/share/Steam-amd-launch.log`, `Steam-amd-native-launch.log`, et `/tmp/dumps/*_stdout.txt` (sortie du client).
 
+**Wayland / Hyprland** : si `hyprland.conf` force `SDL_VIDEODRIVER=wayland` sans repli, Steam affiche *« wayland does not allow fallback »* puis peut planter (erreurs X sur `SteamUpdateUI`, segfault). Ce dépôt utilise **`wayland,x11`** ; les lanceurs exportent aussi `SDL_VIDEODRIVER=wayland,x11` (ou `STEAM_SDL_VIDEODRIVER=x11` pour tout passer en XWayland).
+
+**Locale** : décommenter **`en_US.UTF-8 UTF-8`** dans `/etc/locale.gen` puis `sudo locale-gen` évite *setlocale('en_US.UTF-8') failed*.
+
+Ne pas lancer **deux Steam** en parallèle (message *Log already open*).
+
 ---
 
 ## WPE Manager (Wallpaper Engine)

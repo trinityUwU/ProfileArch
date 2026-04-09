@@ -8,6 +8,8 @@
 #   --with-aur-native    : tente yay/paru pour steam-native-runtime (AUR)
 # Crash silencieux typique : [multilib] désactivé, lib32-mesa / Vulkan 32 bits,
 # runtime Valve / pressure-vessel (bubblewrap, userns), libs mélangées, webhelper.
+# Wayland/Hyprland : SDL_VIDEODRIVER=wayland seul → warning Steam puis segfault possible ;
+# locale en_US.UTF-8 manquante → setlocale failed. Ne pas lancer 2× steam pendant l’install.
 # Doc Arch : https://wiki.archlinux.org/title/Steam
 # Runtime  : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime
 # =============================================================================
@@ -121,8 +123,17 @@ _diagnose() {
         info "Pas de steam-native — lanceur ~/.local/bin/steam-amd-native utilise STEAM_RUNTIME=0 (sans AUR si besoin)"
     fi
     echo ""
-    echo "--- Locale (évite erreurs invalid pointer) ---"
+    echo "--- Locale (Steam teste en_US.UTF-8 au boot) ---"
     locale 2>/dev/null | grep -E 'LANG=|LC_' | head -5 || true
+    if locale -a 2>/dev/null | grep -qiE '^en_US\.(utf8|UTF-8)$'; then
+        ok "locale en_US.UTF-8 disponible (locale -a)"
+    else
+        warn "en_US.UTF-8 absent — sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && sudo locale-gen"
+    fi
+    echo ""
+    echo "--- SDL_VIDEODRIVER (session / shell) ---"
+    echo "    SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-<non défini>}"
+    echo "    (Hyprland ne doit pas forcer « wayland » seul pour Steam — voir hyprland.conf)"
     echo ""
     echo "--- stdout Steam (wrapper Arch redirige vers /tmp/dumps) ---"
     shopt -s nullglob
@@ -223,6 +234,11 @@ ok "Paquets cœur installés"
 info "Extras (layers, vulkaninfo, mesa-utils 32)…"
 sudo pacman -S --needed --noconfirm "${EXTRA_PKGS[@]}" 2>/dev/null || warn "Certains extras indisponibles — non bloquant"
 
+if ! locale -a 2>/dev/null | grep -qiE '^en_US\.(utf8|UTF-8)$'; then
+    warn "Steam signale souvent « setlocale(en_US.UTF-8) failed » sans cette locale."
+    warn "Corriger : sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && sudo locale-gen"
+fi
+
 if [[ "$NON_INTERACTIVE" -ne 1 ]]; then
     read -rp "$(echo -e "${BOLD}Installer gamemode + mangohud ? [o/N] ${NC}")" gm
     if [[ "$gm" =~ ^[oOyY]$ ]]; then
@@ -263,8 +279,16 @@ cat > "$LAUNCHER" << 'STEAMLAUNCH'
 # Steam + AMD : wrapper Arch (/usr/bin/steam) + correctifs WebKit.
 # Si ça crash encore : essaie steam-amd-native (runtime désactivé) ou steam-native (AUR).
 # Log : ~/.local/share/Steam-amd-launch.log
+#
+# Ne lance pas steam en parallèle (autre terminal / script) : « Log already open ».
 
 export STEAM_USE_WEBKIT_SANDBOX="${STEAM_USE_WEBKIT_SANDBOX:-0}"
+
+# Hyprland définit souvent SDL_VIDEODRIVER=wayland sans repli → steam.sh warning + segfault / X errors.
+export SDL_VIDEODRIVER="${STEAM_SDL_VIDEODRIVER:-wayland,x11}"
+# Tout le client en XWayland si encore instable (SteamUpdateUI BadValue, crash après XRR*) :
+# export GDK_BACKEND=x11
+# export STEAM_SDL_VIDEODRIVER=x11
 
 # Crash webhelper / CEF au démarrage :
 # export STEAM_DISABLE_GPU_WEBRENDER=1
@@ -293,6 +317,8 @@ cat > "$LAUNCHER_NATIVE" << 'STEAMNAT'
 # Préfère steam-native si installé (steam-native-runtime AUR, ~130 deps).
 
 export STEAM_USE_WEBKIT_SANDBOX="${STEAM_USE_WEBKIT_SANDBOX:-0}"
+export SDL_VIDEODRIVER="${STEAM_SDL_VIDEODRIVER:-wayland,x11}"
+# export GDK_BACKEND=x11
 # export STEAM_DISABLE_GPU_WEBRENDER=1
 
 LOG="$HOME/.local/share/Steam-amd-native-launch.log"
@@ -356,5 +382,8 @@ echo "  4. Autre log client : ${CYAN}/tmp/dumps/*_stdout.txt${NC}"
 echo "  5. Web / CEF : édite le lanceur et STEAM_DISABLE_GPU_WEBRENDER=1"
 echo "  6. pressure-vessel : ${CYAN}sysctl kernel.unprivileged_userns_clone${NC} doit être 1 (sauf config explicite) ; paquet bubblewrap installé"
 echo "  7. Sync Mesa : ${CYAN}sudo pacman -Syu mesa lib32-mesa${NC}"
-echo "  8. Doc runtime : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime"
+echo "  8. Locale Steam : ${CYAN}en_US.UTF-8${NC} dans /etc/locale.gen + ${CYAN}sudo locale-gen${NC}"
+echo "  9. Hyprland : ${CYAN}SDL_VIDEODRIVER=wayland,x11${NC} (pas wayland seul) — mis à jour dans ce dépôt config/hypr/hyprland.conf"
+echo " 10. Un seul Steam à la fois ; pas pendant que install-steam-amd-arch.sh tourne."
+echo " 11. Doc runtime : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime"
 echo ""

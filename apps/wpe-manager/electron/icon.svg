@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f23"/>
+      <stop offset="100%" style="stop-color:#1a1a3e"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e94560"/>
+      <stop offset="50%" style="stop-color:#8b2fc9"/>
+      <stop offset="100%" style="stop-color:#00d4ff"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0"/>
+      <stop offset="50%" style="stop-color:#00d4ff;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#00d4ff;stop-opacity:0"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="64" height="64" rx="12" fill="url(#bg)"/>
+  <!-- Monitor outer -->
+  <rect x="6" y="9" width="52" height="36" rx="4" fill="#0d1b2a" stroke="#00d4ff" stroke-width="1.5"/>
+  <!-- Screen content -->
+  <rect x="9" y="12" width="46" height="30" rx="2" fill="url(#screen)"/>
+  <!-- Shimmer lines on screen -->
+  <line x1="9" y1="18" x2="55" y2="18" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <line x1="9" y1="24" x2="55" y2="24" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <line x1="9" y1="30" x2="55" y2="30" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <line x1="9" y1="36" x2="55" y2="36" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+  <!-- Monitor stand -->
+  <rect x="28" y="45" width="8" height="6" fill="#0d1b2a"/>
+  <!-- Base -->
+  <rect x="21" y="51" width="22" height="4" rx="2" fill="#0d1b2a" stroke="#00d4ff" stroke-width="1"/>
+  <!-- Accent glow line at bottom of screen -->
+  <rect x="9" y="40" width="46" height="2" rx="1" fill="url(#glow)" opacity="0.8"/>
+  <!-- Small play button icon in center -->
+  <circle cx="32" cy="27" r="8" fill="rgba(0,0,0,0.35)"/>
+  <polygon points="29,23 37,27 29,31" fill="white" opacity="0.9"/>
+</svg>

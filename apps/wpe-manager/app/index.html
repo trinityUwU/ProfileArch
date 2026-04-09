@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WALLCTL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&family=Barlow:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #080b0f;
+    --bg2:       #0d1117;
+    --bg3:       #121820;
+    --panel:     #0f151d;
+    --border:    #1e2a38;
+    --border2:   #253347;
+    --accent:    #00e5ff;
+    --accent2:   #ff3d71;
+    --text:      #c8d8e8;
+    --text2:     #5a7a99;
+    --text3:     #3a5570;
+    --green:     #00ff88;
+    --yellow:    #ffcc00;
+    --mono:      'Share Tech Mono', monospace;
+    --head:      'Barlow Condensed', sans-serif;
+    --body:      'Barlow', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 14px;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* SCANLINES */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* NOISE */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 9998; opacity: .4;
+  }
+
+  /* LAYOUT */
+  .shell {
+    display: grid;
+    grid-template-rows: 52px 1fr;
+    grid-template-columns: 300px 1fr;
+    height: 100vh;
+  }
+
+  /* TOPBAR */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 0 24px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .topbar::after {
+    content: '';
+    position: absolute; bottom: -1px; left: 0;
+    width: 100%; height: 1px;
+    background: linear-gradient(90deg, var(--accent) 0%, transparent 60%);
+    opacity: .3;
+  }
+
+  .logo {
+    font-family: var(--head);
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: 6px;
+    color: #fff;
+    text-transform: uppercase;
+  }
+  .logo span { color: var(--accent); }
+
+  .tagline {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 2px;
+  }
+
+  .topbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: .4; }
+  }
+
+  .status-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+    letter-spacing: 1px;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .section-label {
+    font-family: var(--head);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--text3);
+    text-transform: uppercase;
+  }
+
+  /* SCREEN SLOTS */
+  .screens-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .screen-slot {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .screen-slot:hover { border-color: var(--border2); background: #161f2a; }
+  .screen-slot.active {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.04);
+  }
+  .screen-slot.active::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+  }
+
+  .slot-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .slot-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+  .slot-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.05);
+    color: var(--text3);
+    letter-spacing: 1px;
+  }
+  .slot-title {
+    font-size: 11px;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .slot-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+
+  /* APPLY BTN */
+  .btn-apply {
+    margin: 0 20px 16px;
+    padding: 12px;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: var(--head);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .btn-apply::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: var(--accent);
+    transform: translateX(-100%);
+    transition: transform .2s;
+    z-index: 0;
+  }
+  .btn-apply:hover::before { transform: translateX(0); }
+  .btn-apply:hover { color: #000; }
+  .btn-apply span { position: relative; z-index: 1; }
+  .btn-apply.loading { opacity: .5; pointer-events: none; }
+
+  /* FILTER BAR */
+  .filter-bar {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .search-wrap {
+    position: relative;
+  }
+  .search-wrap::before {
+    content: '⌕';
+    position: absolute; left: 10px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--text3);
+    font-size: 16px;
+    pointer-events: none;
+  }
+  input[type=search] {
+    width: 100%;
+    padding: 8px 10px 8px 30px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input[type=search]:focus { border-color: var(--border2); }
+  input[type=search]::placeholder { color: var(--text3); }
+
+  .filter-pills {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    color: var(--text3);
+    cursor: pointer;
+    transition: all .12s;
+    background: transparent;
+  }
+  .pill:hover { border-color: var(--border2); color: var(--text2); }
+  .pill.on {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,229,255,0.06);
+  }
+
+  /* WALLPAPER LIST */
+  .wp-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .wp-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all .12s;
+    margin-bottom: 2px;
+  }
+  .wp-item:hover { background: rgba(255,255,255,0.03); border-color: var(--border); }
+  .wp-item.selected { background: rgba(0,229,255,0.05); border-color: var(--accent); }
+
+  .wp-thumb {
+    width: 48px;
+    height: 30px;
+    object-fit: cover;
+    border-radius: 2px;
+    background: var(--bg3);
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+  }
+  .wp-thumb-placeholder {
+    width: 48px; height: 30px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text3);
+    font-size: 14px;
+  }
+
+  .wp-info { flex: 1; min-width: 0; }
+  .wp-title {
+    font-size: 12px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+  }
+  .wp-meta {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+  .wp-type-tag {
+    font-family: var(--mono);
+    font-size: 8px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .tag-video  { background: rgba(0,229,255,.12); color: var(--accent); }
+  .tag-scene  { background: rgba(0,255,136,.1);  color: var(--green); }
+  .tag-other  { background: rgba(90,120,150,.1); color: var(--text3); }
+
+  /* MAIN PANEL */
+  .main {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* PREVIEW AREA */
+  .preview-area {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 30% 50%, rgba(0,229,255,0.03) 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 50%, rgba(255,61,113,0.02) 0%, transparent 50%);
+  }
+
+  .preview-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    opacity: .3;
+  }
+  .preview-placeholder svg { width: 64px; height: 64px; }
+  .preview-placeholder p {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--text3);
+  }
+
+  .preview-img {
+    max-width: 80%;
+    max-height: 100%;
+    object-fit: contain;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 0 60px rgba(0,0,0,.8);
+  }
+
+  .preview-vid {
+    max-width: 80%;
+    max-height: 100%;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 0 60px rgba(0,0,0,.8);
+  }
+
+
+  /* PREVIEW STRIP */
+  .preview-strip {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 28px 24px 16px;
+    background: linear-gradient(transparent, rgba(8,11,15,0.92));
+    display: none;
+    align-items: flex-end;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .preview-strip.show { display: flex; }
+  .preview-strip-left { min-width: 0; }
+  .preview-strip-title {
+    font-family: var(--head);
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 10px rgba(0,0,0,1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 500px;
+  }
+  .preview-strip-sub {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text2);
+    margin-top: 3px;
+    letter-spacing: 1px;
+  }
+  .preview-strip-hint {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    letter-spacing: 1px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* CONTEXT MENU */
+  .ctx-menu {
+    position: fixed;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    min-width: 200px;
+    z-index: 3000;
+    box-shadow: 0 8px 40px rgba(0,0,0,.8), 0 0 0 1px rgba(0,229,255,0.05);
+    display: none;
+    overflow: hidden;
+  }
+  .ctx-menu.show { display: block; }
+  .ctx-menu-header {
+    padding: 10px 14px 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--text3);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+  }
+  .ctx-menu-label {
+    padding: 6px 14px 4px;
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 2px;
+    color: var(--text3);
+    text-transform: uppercase;
+  }
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    cursor: pointer;
+    transition: background .1s;
+  }
+  .ctx-item:hover { background: rgba(0,229,255,0.06); }
+  .ctx-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--border2);
+    flex-shrink: 0;
+    transition: background .1s;
+  }
+  .ctx-item:hover .ctx-dot { background: var(--accent); }
+  .ctx-item.ctx-active .ctx-dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .ctx-item.ctx-assigned .ctx-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .ctx-screen-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text2);
+    flex: 1;
+    letter-spacing: 1px;
+  }
+  .ctx-item:hover .ctx-screen-name { color: var(--accent); }
+  .ctx-item.ctx-active .ctx-screen-name { color: var(--accent); }
+  .ctx-item.ctx-assigned .ctx-screen-name { color: var(--green); }
+  .ctx-badge {
+    font-family: var(--mono);
+    font-size: 8px;
+    color: var(--text3);
+    letter-spacing: 1px;
+  }
+  .ctx-item.ctx-assigned .ctx-badge { color: var(--green); }
+
+  /* BOTTOM BAR */
+  .bottom-bar {
+    padding: 14px 24px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .selected-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sel-thumb {
+    width: 56px;
+    height: 35px;
+    object-fit: cover;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sel-thumb-empty {
+    width: 56px; height: 35px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .sel-details { min-width: 0; }
+  .sel-title {
+    font-family: var(--head);
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sel-sub {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+
+  .sep {
+    width: 1px; height: 30px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  /* TARGET SCREEN INDICATOR */
+  .target-block {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 0 20px;
+    border-left: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .target-label {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 2px;
+    color: var(--text3);
+    text-transform: uppercase;
+  }
+  .target-name {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(0,229,255,.4);
+  }
+  .target-none {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 1px;
+  }
+
+  /* TOAST */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 20px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--green);
+    box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    transform: translateY(20px);
+    opacity: 0;
+    transition: all .2s;
+    z-index: 1000;
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.error { color: var(--accent2); border-color: var(--accent2); }
+
+  /* COUNT BADGE */
+  .count-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    margin-left: auto;
+  }
+
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="logo">WALL<span>CTL</span></div>
+    <div class="tagline">// WALLPAPER CONTROL SYSTEM v3</div>
+    <div class="topbar-right">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-label" id="statusLabel">CONNECTING...</span>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="section-label">SCREEN ASSIGNMENT</div>
+      <div class="screens-stack" id="screensStack">
+        <!-- populated by JS -->
+      </div>
+    </div>
+
+    <button class="btn-apply" id="btnApply" onclick="applyAll()">
+      <span>▶ APPLY TO SCREENS</span>
+    </button>
+
+    <div class="filter-bar">
+      <div class="search-wrap">
+        <input type="search" id="searchInput" placeholder="search wallpapers..." oninput="render()">
+      </div>
+      <div class="filter-pills" id="filterPills">
+        <button class="pill on" data-f="all"    onclick="setFilter('all',this)">ALL</button>
+        <button class="pill"    data-f="video"  onclick="setFilter('video',this)">VIDEO</button>
+        <button class="pill"    data-f="scene"  onclick="setFilter('scene',this)">SCENE</button>
+        <button class="pill"    data-f="other"  onclick="setFilter('other',this)">OTHER</button>
+      </div>
+    </div>
+
+    <div class="wp-list" id="wpList">
+      <div class="empty-state">LOADING WALLPAPERS...</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="preview-area" id="previewArea">
+      <div class="preview-placeholder" id="previewPlaceholder">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="10" width="56" height="38" rx="3" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M4 44h56" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M22 54h20M32 48v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="32" cy="29" r="8" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M29 27l7 2-7 2V27z" fill="currentColor"/>
+        </svg>
+        <p>SELECT A WALLPAPER TO PREVIEW</p>
+      </div>
+      <div class="preview-strip" id="previewStrip">
+        <div class="preview-strip-left">
+          <div class="preview-strip-title" id="previewStripTitle"></div>
+          <div class="preview-strip-sub" id="previewStripSub"></div>
+        </div>
+        <div class="preview-strip-hint">RIGHT-CLICK TO ASSIGN</div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <div class="selected-preview" id="bottomSelected">
+        <div class="sel-thumb-empty"></div>
+        <div class="sel-details">
+          <div class="sel-title">No wallpaper selected</div>
+          <div class="sel-sub">LEFT CLICK TO PREVIEW — RIGHT CLICK TO ASSIGN</div>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="target-block">
+        <div class="target-label">TARGET SCREEN</div>
+        <div id="targetName" class="target-none">— NONE —</div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<div class="ctx-menu" id="ctxMenu">
+  <div class="ctx-menu-header" id="ctxMenuTitle"></div>
+  <div class="ctx-menu-label">ASSIGN TO SCREEN</div>
+  <div id="ctxMenuItems"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'http://localhost:6969';
+let wallpapers   = [];
+let assignment   = {};
+let screens      = [];
+let selected     = null;   // wp_id en cours de preview
+let activeScreen = null;   // écran cible actif
+let filterType   = 'all';
+let ctxWpId      = null;   // wp_id en attente dans le ctx menu
+let capabilities = { linux_wallpaperengine: false, use_scenes_via_lwe: false, web_runner_available: false };
+
+// ── BOOT ────────────────────────────────────────────────────────────────────
+async function boot() {
+  try {
+    [screens, assignment, wallpapers, capabilities] = await Promise.all([
+      fetch(`${API}/api/screens`).then(r=>r.json()),
+      fetch(`${API}/api/assignment`).then(r=>r.json()),
+      fetch(`${API}/api/wallpapers`).then(r=>r.json()),
+      fetch(`${API}/api/capabilities`).then(r=>r.json()),
+    ]);
+    document.getElementById('statusDot').style.background = 'var(--green)';
+    document.getElementById('statusLabel').textContent = `${wallpapers.length} WALLPAPERS`;
+    renderScreens();
+    render();
+    if (screens.length) selectScreen(screens[0]);
+  } catch(e) {
+    document.getElementById('statusDot').style.background = 'var(--accent2)';
+    document.getElementById('statusLabel').textContent = 'SERVER OFFLINE';
+    document.getElementById('wpList').innerHTML =
+      '<div class="empty-state">⚠ CANNOT REACH SERVER<br><br>python server.py</div>';
+  }
+}
+
+// ── SCREENS ─────────────────────────────────────────────────────────────────
+const SCREEN_META = { 'DP-1': { hz: '165HZ', pos: 'DROITE' }, 'HDMI-A-1': { hz: '60HZ', pos: 'GAUCHE' } };
+
+function renderScreens() {
+  const container = document.getElementById('screensStack');
+  container.innerHTML = screens.map(s => {
+    const wpId  = assignment[s] || '';
+    const wp    = wallpapers.find(w => w.id === wpId);
+    const title = wp ? truncate(wp.title, 26) : 'non assigné';
+    const meta  = SCREEN_META[s] || { hz: '—', pos: '—' };
+    const active = s === activeScreen ? 'active' : '';
+    return `
+    <div class="screen-slot ${active}" onclick="selectScreen('${s}')" id="slot-${s}">
+      <div class="slot-top">
+        <span class="slot-name">${s}</span>
+        <span class="slot-badge">${meta.pos} · ${meta.hz}</span>
+      </div>
+      <div class="slot-title">${title}</div>
+      <div class="slot-hint">${wpId ? `ID: ${wpId}` : 'clic droit sur un fond pour assigner'}</div>
+    </div>`;
+  }).join('');
+
+  // Mettre à jour l'indicateur dans la bottom bar
+  const tgt = document.getElementById('targetName');
+  if (activeScreen) {
+    tgt.className = 'target-name';
+    tgt.textContent = activeScreen;
+  } else {
+    tgt.className = 'target-none';
+    tgt.textContent = '— NONE —';
+  }
+}
+
+function selectScreen(s) {
+  activeScreen = s;
+  renderScreens();
+  // Prévisualiser le wallpaper déjà assigné à cet écran
+  const wpId = assignment[s];
+  if (wpId) {
+    const wp = wallpapers.find(w => w.id === wpId);
+    if (wp) previewWallpaper(wp, false);
+  }
+}
+
+// ── FILTER / RENDER LIST ─────────────────────────────────────────────────────
+function setFilter(f, el) {
+  filterType = f;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('on'));
+  el.classList.add('on');
+  render();
+}
+
+function render() {
+  const q    = document.getElementById('searchInput').value.toLowerCase();
+  const list = document.getElementById('wpList');
+
+  let wps = wallpapers;
+  if (filterType === 'video') wps = wps.filter(w => w.has_video);
+  else if (filterType === 'scene') wps = wps.filter(w => ['scene','application'].includes(w.type) && !w.has_video);
+  else if (filterType === 'other') wps = wps.filter(w => !w.has_video && !['scene','application'].includes(w.type));
+  if (q) wps = wps.filter(w => w.title.toLowerCase().includes(q) || w.id.includes(q));
+
+  if (!wps.length) {
+    list.innerHTML = '<div class="empty-state">NO RESULTS</div>'; return;
+  }
+
+  list.innerHTML = wps.map(w => {
+    const isSelected = w.id === selected ? 'selected' : '';
+    const thumb = w.preview
+      ? `<img class="wp-thumb" src="${API}${w.preview}" loading="lazy" onerror="this.style.display='none'">`
+      : `<div class="wp-thumb-placeholder">▣</div>`;
+    const typeTag = w.has_video
+      ? `<span class="wp-type-tag tag-video">MP4</span>`
+      : ['scene','application'].includes(w.type)
+        ? `<span class="wp-type-tag tag-scene">SCENE</span>`
+        : `<span class="wp-type-tag tag-other">${w.type.toUpperCase().slice(0,5)||'?'}</span>`;
+    return `
+    <div class="wp-item ${isSelected}"
+         onclick="onWpClick('${w.id}')"
+         oncontextmenu="onWpRightClick('${w.id}',event)"
+         id="wpitem-${w.id}">
+      ${thumb}
+      <div class="wp-info">
+        <div class="wp-title">${escHtml(w.title)}</div>
+        <div class="wp-meta">${w.id}</div>
+      </div>
+      ${typeTag}
+    </div>`;
+  }).join('');
+}
+
+// ── CLIC GAUCHE : prévisualisation uniquement ─────────────────────────────
+function onWpClick(wpId) {
+  hideCtxMenu();
+  const wp = wallpapers.find(w => w.id === wpId);
+  if (!wp) return;
+  previewWallpaper(wp, true);
+}
+
+// ── CLIC DROIT : menu contextuel d'assignation ───────────────────────────
+function onWpRightClick(wpId, event) {
+  event.preventDefault();
+  ctxWpId = wpId;
+  const wp = wallpapers.find(w => w.id === wpId);
+  if (!wp) return;
+
+  const menu  = document.getElementById('ctxMenu');
+  const title = document.getElementById('ctxMenuTitle');
+  const items = document.getElementById('ctxMenuItems');
+
+  title.textContent = truncate(wp.title, 30);
+
+  items.innerHTML = screens.map(s => {
+    const isAssigned = assignment[s] === wpId;
+    const isActive   = s === activeScreen;
+    const meta       = SCREEN_META[s] || { hz: '—', pos: '—' };
+    let cls = '';
+    if (isAssigned) cls = 'ctx-assigned';
+    else if (isActive) cls = 'ctx-active';
+    const check = isAssigned ? '✓ ' : '';
+    return `
+    <div class="ctx-item ${cls}" onclick="assignTo('${s}','${wpId}')">
+      <div class="ctx-dot"></div>
+      <span class="ctx-screen-name">${check}${s}</span>
+      <span class="ctx-badge">${meta.pos} · ${meta.hz}</span>
+    </div>`;
+  }).join('');
+
+  // Positionner le menu en évitant les bords
+  menu.style.display = 'block';
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const vw = window.innerWidth,  vh = window.innerHeight;
+  let x = event.clientX, y = event.clientY;
+  if (x + mw > vw - 8) x = vw - mw - 8;
+  if (y + mh > vh - 8) y = vh - mh - 8;
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+  menu.classList.add('show');
+}
+
+function hideCtxMenu() {
+  const menu = document.getElementById('ctxMenu');
+  menu.classList.remove('show');
+  menu.style.display = '';
+  menu.style.left = '';
+  menu.style.top = '';
+  ctxWpId = null;
+}
+
+// Fermer le menu : clic en dehors, Échap, ou clic sur une option (déjà géré dans assignTo)
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('ctxMenu');
+  if (!menu.classList.contains('show')) return;
+  if (e.target.closest('#ctxMenu')) return; // clic à l'intérieur = ne pas fermer ici (option ferme via assignTo)
+  hideCtxMenu();
+});
+document.addEventListener('contextmenu', (e) => {
+  if (!e.target.closest('.wp-item')) hideCtxMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideCtxMenu();
+});
+
+// ── PREVIEW ──────────────────────────────────────────────────────────────────
+function previewWallpaper(wp, updateSelected) {
+  if (updateSelected) {
+    selected = wp.id;
+    render();
+  }
+
+  const area  = document.getElementById('previewArea');
+  const ph    = document.getElementById('previewPlaceholder');
+  const strip = document.getElementById('previewStrip');
+
+  area.querySelectorAll('.preview-img,.preview-vid').forEach(e => e.remove());
+
+  ph.style.display = 'none';
+  strip.classList.add('show');
+
+  document.getElementById('previewStripTitle').textContent = wp.title;
+  const assignedTo = screens.filter(s => assignment[s] === wp.id);
+  const subParts = [`ID: ${wp.id}`, wp.type.toUpperCase()];
+  if (assignedTo.length) subParts.push(`ASSIGNÉ → ${assignedTo.join(', ')}`);
+  document.getElementById('previewStripSub').textContent = subParts.join(' · ');
+
+  if (wp.preview) {
+    const ext = wp.preview.split('.').pop().toLowerCase();
+    if (['gif','webm','mp4'].includes(ext)) {
+      const vid = document.createElement('video');
+      vid.className = 'preview-vid';
+      vid.src = `${API}${wp.preview}`;
+      vid.loop = true; vid.autoplay = true; vid.muted = true; vid.playsInline = true;
+      area.insertBefore(vid, strip);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'preview-img';
+      img.src = `${API}${wp.preview}`;
+      area.insertBefore(img, strip);
+    }
+  }
+
+  updateBottomBar(wp);
+}
+
+function updateBottomBar(wp) {
+  const bar = document.getElementById('bottomSelected');
+  const thumbHtml = wp.preview
+    ? `<img class="sel-thumb" src="${API}${wp.preview}" onerror="this.style.display='none'">`
+    : `<div class="sel-thumb-empty"></div>`;
+  const assigned = screens.filter(s => assignment[s] === wp.id).map(s => `<b>${s}</b>`).join(', ');
+  let sub = assigned ? `ASSIGNÉ À : ${assigned}` : 'NON ASSIGNÉ — CLIC DROIT POUR ASSIGNER';
+  if (wp.has_web_entry) {
+    sub += ' · ';
+    sub += capabilities.web_runner_available
+      ? 'WEB (HTML) — supporté (WebView)'
+      : 'WEB (HTML) — installez gtk-layer-shell et webkit2gtk';
+  } else if (wp.is_scene) {
+    sub += ' · ';
+    if (capabilities.use_scenes_via_lwe && capabilities.linux_wallpaperengine)
+      sub += 'SCENE (LWE activé)';
+    else
+      sub += 'SCENE — non supporté (pas de HTML ; privilégier fonds vidéo ou web)';
+  }
+  bar.innerHTML = `
+    ${thumbHtml}
+    <div class="sel-details">
+      <div class="sel-title">${escHtml(wp.title)}</div>
+      <div class="sel-sub">${sub}</div>
+    </div>`;
+}
+
+// ── ASSIGNATION ──────────────────────────────────────────────────────────────
+function assignTo(screen, wpId) {
+  hideCtxMenu();
+  assignment[screen] = wpId;
+  // Switcher le focus vers l'écran qu'on vient d'assigner
+  activeScreen = screen;
+  renderScreens();
+  const wp = wallpapers.find(w => w.id === wpId);
+  if (wp) previewWallpaper(wp, false);
+  toast(`${screen} → ${truncate(wp?.title || wpId, 28)}`, false);
+}
+
+// ── APPLY ────────────────────────────────────────────────────────────────────
+async function applyAll() {
+  const btn = document.getElementById('btnApply');
+  btn.classList.add('loading');
+  btn.querySelector('span').textContent = '⏳ APPLYING...';
+  try {
+    const res = await fetch(`${API}/api/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignment })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      if (data.warning) toast(data.warning, true);
+      else if (data.info) toast(data.info, false);
+      else toast('WALLPAPERS APPLIED ✓', false);
+      renderScreens();
+    } else throw new Error();
+  } catch {
+    toast('APPLY FAILED', true);
+  } finally {
+    btn.classList.remove('loading');
+    btn.querySelector('span').textContent = '▶ APPLY TO SCREENS';
+  }
+}
+
+// ── UTILS ────────────────────────────────────────────────────────────────────
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+boot();
+</script>
+</body>
+</html>

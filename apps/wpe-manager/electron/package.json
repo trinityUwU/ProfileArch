@@ -1,0 +1,9 @@
+{
+  "name": "wpe-manager",
+  "version": "1.0.0",
+  "description": "Wallpaper Engine Manager",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  }
+}

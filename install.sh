@@ -487,6 +487,12 @@ else
     ok "Venv Python déjà en place ($VENV_DIR)"
 fi
 
+# ── Waybar HyDE off (une seule barre : Quickshell) ────────────────────────────
+if [[ -x "$SCRIPT_DIR/disable-waybar.sh" ]]; then
+    info "Désactivation waybar HyDE (évite double barre avec Quickshell)..."
+    bash "$SCRIPT_DIR/disable-waybar.sh"
+fi
+
 # ── xdg-user-dirs ─────────────────────────────────────────────────────────────
 xdg-user-dirs-update 2>/dev/null || true
 

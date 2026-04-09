@@ -377,32 +377,64 @@ else
     ok "quickshell/ii/shell.qml présent"
 fi
 
-# Créer les répertoires d'état attendus par quickshell ii
-mkdir -p "$HOME/.local/state/quickshell/user/generated"
-mkdir -p "$HOME/.cache/quickshell"
-
-# S'assurer que colors.json est en place (violet)
-COLORS_DST="$HOME/.local/state/quickshell/user/generated/colors.json"
-COLORS_SRC="$STATE_SRC/quickshell-generated/colors.json"
-if [[ ! -f "$COLORS_DST" ]] && [[ -f "$COLORS_SRC" ]]; then
-    cp "$COLORS_SRC" "$COLORS_DST"
-    ok "colors.json violet copié"
-elif [[ -f "$COLORS_DST" ]]; then
-    ok "colors.json déjà en place"
+# ── Matugen templates depuis backup ───────────────────────────────────────────
+info "Restauration templates matugen..."
+if [[ -d "$CONFIG_SRC/matugen" ]]; then
+    mkdir -p "$HOME/.config/matugen"
+    rsync -a "$CONFIG_SRC/matugen/" "$HOME/.config/matugen/"
+    ok "Templates matugen restaurés"
 fi
 
-# material_colors.scss aussi
-SCSS_DST="$HOME/.local/state/quickshell/user/generated/material_colors.scss"
-SCSS_SRC="$STATE_SRC/quickshell-generated/material_colors.scss"
-[[ ! -f "$SCSS_DST" ]] && [[ -f "$SCSS_SRC" ]] && cp "$SCSS_SRC" "$SCSS_DST" && ok "material_colors.scss copié"
+# ── Config illogical-impulse avec accentColor violet ─────────────────────────
+info "Config illogical-impulse (accentColor #9d6ff5)..."
+mkdir -p "$HOME/.config/illogical-impulse"
+if [[ -f "$CONFIG_SRC/illogical-impulse/config.json" ]]; then
+    if [[ -f "$HOME/.config/illogical-impulse/config.json" ]] && command -v jq &>/dev/null; then
+        # Mettre à jour uniquement accentColor et type dans le fichier existant
+        _tmp=$(mktemp)
+        jq '.appearance.palette.accentColor = "#9d6ff5" | .appearance.palette.type = "scheme-tonal-spot"' \
+            "$HOME/.config/illogical-impulse/config.json" > "$_tmp" \
+            && mv "$_tmp" "$HOME/.config/illogical-impulse/config.json" \
+            && ok "accentColor → #9d6ff5"
+    else
+        cp "$CONFIG_SRC/illogical-impulse/config.json" "$HOME/.config/illogical-impulse/config.json"
+        ok "config.json illogical-impulse copié (accentColor: #9d6ff5)"
+    fi
+fi
 
-# ── Application palette couleurs ──────────────────────────────────────────────
-info "Application palette violet Material You..."
-APPLYCOLOR="$HOME/.config/quickshell/ii/scripts/colors/applycolor.sh"
-if [[ -f "$APPLYCOLOR" ]]; then
-    bash "$APPLYCOLOR" 2>/dev/null && ok "Palette appliquée via applycolor.sh" || warn "applycolor.sh a signalé une erreur (non bloquant)"
+# ── Créer les répertoires d'état quickshell ───────────────────────────────────
+mkdir -p "$HOME/.local/state/quickshell/user/generated/terminal"
+mkdir -p "$HOME/.local/state/quickshell/user/generated/wallpaper"
+mkdir -p "$HOME/.cache/quickshell"
+
+# ── Copier les couleurs pré-générées depuis backup ────────────────────────────
+info "Couleurs Material You (violet pré-générées)..."
+QS_STATE="$HOME/.local/state/quickshell/user/generated"
+[[ -f "$STATE_SRC/quickshell-generated/colors.json" ]] \
+    && cp "$STATE_SRC/quickshell-generated/colors.json"         "$QS_STATE/colors.json" \
+    && ok "colors.json violet"
+[[ -f "$STATE_SRC/quickshell-generated/material_colors.scss" ]] \
+    && cp "$STATE_SRC/quickshell-generated/material_colors.scss" "$QS_STATE/material_colors.scss" \
+    && ok "material_colors.scss violet"
+
+# ── Lancer matugen pour générer TOUS les templates (GTK, hyprland, etc.) ──────
+info "Génération matugen (couleur hex #9d6ff5)..."
+if command -v matugen &>/dev/null; then
+    matugen color hex "#9d6ff5" --mode dark 2>/dev/null \
+        && ok "matugen exécuté — GTK css, hyprlock colors, colors.json générés" \
+        || warn "matugen erreur (non bloquant — backup colors.json utilisé)"
 else
-    warn "applycolor.sh non trouvé — couleurs appliquées manuellement via colors.json"
+    warn "matugen non installé — couleurs depuis backup uniquement"
+fi
+
+# ── Application palette couleurs terminal ─────────────────────────────────────
+info "Application palette terminal..."
+APPLYCOLOR="$HOME/.config/quickshell/ii/scripts/colors/applycolor.sh"
+[[ -f "$APPLYCOLOR" ]] && chmod +x "$APPLYCOLOR"
+if [[ -f "$APPLYCOLOR" ]]; then
+    bash "$APPLYCOLOR" 2>/dev/null && ok "Palette terminal appliquée" || warn "applycolor.sh: erreur mineure"
+else
+    warn "applycolor.sh non trouvé"
 fi
 
 # ── GTK via gsettings ─────────────────────────────────────────────────────────

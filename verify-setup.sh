@@ -186,17 +186,51 @@ _cfg_check "~/.config/quickshell/ii/settings.qml"  "quickshell/ii/settings.qml" 
 _cfg_check "~/.config/quickshell/ii/GlobalStates.qml" "quickshell/ii/GlobalStates.qml" "fix_quickshell"
 
 echo ""
+info "Config illogical-impulse (accentColor)..."
+II_CFG="$HOME/.config/illogical-impulse/config.json"
+if [[ -f "$II_CFG" ]]; then
+    if command -v jq &>/dev/null; then
+        accent=$(jq -r '.appearance.palette.accentColor // ""' "$II_CFG" 2>/dev/null)
+        if [[ "$accent" == "#9d6ff5" ]]; then
+            pass "illogical-impulse/config.json — accentColor: #9d6ff5 ✓"
+        elif [[ -z "$accent" ]]; then
+            fail "illogical-impulse/config.json — accentColor VIDE (couleurs depuis wallpaper = défaut)" "fix_accent"
+        else
+            warn2 "illogical-impulse/config.json — accentColor: $accent (attendu #9d6ff5)"
+            FIXABLE+=("fix_accent")
+        fi
+    else
+        pass "illogical-impulse/config.json présent (jq manquant pour vérifier)"
+    fi
+else
+    fail "illogical-impulse/config.json MANQUANT (couleurs jamais appliquées)" "fix_accent"
+fi
+
+echo ""
+info "Templates matugen..."
+MATUGEN_CFG="$HOME/.config/matugen"
+if [[ -f "$MATUGEN_CFG/config.toml" ]]; then
+    pass "matugen/config.toml présent"
+    [[ -d "$MATUGEN_CFG/templates" ]] && pass "matugen/templates présent" || \
+        fail "matugen/templates MANQUANT" "fix_matugen"
+else
+    fail "~/.config/matugen MANQUANT — matugen ne peut pas générer les couleurs" "fix_matugen"
+fi
+
+echo ""
 info "Couleurs Material You (violet)..."
 COLORS_FILE="$HOME/.local/state/quickshell/user/generated/colors.json"
 if [[ -f "$COLORS_FILE" ]]; then
-    # Vérifier que c'est bien notre palette violet
-    if grep -q '"primary": "#9d6ff5"' "$COLORS_FILE" 2>/dev/null; then
-        pass "colors.json — palette violet (#9d6ff5) ✓"
+    if command -v jq &>/dev/null; then
+        primary=$(jq -r '.primary // ""' "$COLORS_FILE" 2>/dev/null)
+        if [[ "${primary,,}" == "#9d6ff5" ]]; then
+            pass "colors.json — palette violet (#9d6ff5) ✓"
+        else
+            warn2 "colors.json présent mais primary: $primary (attendu #9d6ff5)"
+            FIXABLE+=("fix_colors")
+        fi
     else
-        primary=$(grep '"primary"' "$COLORS_FILE" 2>/dev/null | head -1 | tr -d ' ",' | cut -d: -f2)
-        warn2 "colors.json présent mais palette différente (primary: $primary)"
-        warn2 "  → Attendu : #9d6ff5"
-        FIXABLE+=("fix_colors")
+        pass "colors.json présent"
     fi
 else
     fail "colors.json MANQUANT" "fix_colors"
@@ -388,18 +422,48 @@ if [[ "$AUTO_FIX" -eq 1 || "$FIX_QS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q 
     fi
 fi
 
-# ── Fix : couleurs violet ──────────────────────────────────────────────────────
-if [[ "$AUTO_FIX" -eq 1 || "$FIX_COLORS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_colors"; then
-    fix "Restauration palette violet Material You..."
-    mkdir -p "$HOME/.local/state/quickshell/user/generated"
-    if [[ -d "$STATE_SRC/quickshell-generated" ]]; then
-        cp "$STATE_SRC/quickshell-generated/"* \
-            "$HOME/.local/state/quickshell/user/generated/" 2>/dev/null
-        ok "colors.json violet restauré"
+# ── Fix : accentColor illogical-impulse ───────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 || "$FIX_COLORS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_accent"; then
+    fix "Forcer accentColor #9d6ff5 dans illogical-impulse/config.json..."
+    mkdir -p "$HOME/.config/illogical-impulse"
+    II_CFG="$HOME/.config/illogical-impulse/config.json"
+    if [[ -f "$II_CFG" ]] && command -v jq &>/dev/null; then
+        _tmp=$(mktemp)
+        jq '.appearance.palette.accentColor = "#9d6ff5" | .appearance.palette.type = "scheme-tonal-spot"' \
+            "$II_CFG" > "$_tmp" && mv "$_tmp" "$II_CFG"
+        ok "accentColor → #9d6ff5"
+    elif [[ -f "$SCRIPT_DIR/config/illogical-impulse/config.json" ]]; then
+        cp "$SCRIPT_DIR/config/illogical-impulse/config.json" "$II_CFG"
+        ok "config.json copié depuis backup (accentColor: #9d6ff5)"
+    else
+        warn "Impossible de corriger accentColor — lance: bash fix-colors.sh"
     fi
-    APPLYCOLOR="$HOME/.config/quickshell/ii/scripts/colors/applycolor.sh"
-    if [[ -f "$APPLYCOLOR" ]]; then
-        bash "$APPLYCOLOR" 2>/dev/null && ok "Palette appliquée via applycolor.sh" || warn "applycolor.sh erreur"
+fi
+
+# ── Fix : templates matugen ───────────────────────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_matugen"; then
+    fix "Restauration templates matugen..."
+    if [[ -d "$SCRIPT_DIR/config/matugen" ]]; then
+        mkdir -p "$HOME/.config/matugen"
+        rsync -a "$SCRIPT_DIR/config/matugen/" "$HOME/.config/matugen/"
+        ok "Templates matugen restaurés"
+    fi
+fi
+
+# ── Fix : couleurs violet (pipeline complet) ──────────────────────────────────
+if [[ "$AUTO_FIX" -eq 1 || "$FIX_COLORS" -eq 1 ]] || echo "${FIXABLE[*]}" | grep -q "fix_colors"; then
+    fix "Application complète palette violet via fix-colors.sh..."
+    if [[ -f "$SCRIPT_DIR/fix-colors.sh" ]]; then
+        bash "$SCRIPT_DIR/fix-colors.sh"
+    else
+        # Fallback manuel
+        mkdir -p "$HOME/.local/state/quickshell/user/generated"
+        [[ -d "$STATE_SRC/quickshell-generated" ]] && \
+            cp "$STATE_SRC/quickshell-generated/"* "$HOME/.local/state/quickshell/user/generated/" 2>/dev/null
+        [[ -f "$HOME/.config/matugen/config.toml" ]] && command -v matugen &>/dev/null && \
+            matugen color hex "#9d6ff5" --mode dark 2>/dev/null && ok "matugen lancé"
+        APPLYCOLOR="$HOME/.config/quickshell/ii/scripts/colors/applycolor.sh"
+        [[ -f "$APPLYCOLOR" ]] && bash "$APPLYCOLOR" 2>/dev/null && ok "Palette appliquée"
     fi
 fi
 

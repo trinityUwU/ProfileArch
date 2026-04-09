@@ -487,6 +487,12 @@ else
     ok "Venv Python déjà en place ($VENV_DIR)"
 fi
 
+# ── Shaders Hyprland (évite "Screen shader path not found") ───────────────────
+if [[ -x "$SCRIPT_DIR/fix-shader-hypr.sh" ]]; then
+    info "Correction chemins shader Hyprland..."
+    bash "$SCRIPT_DIR/fix-shader-hypr.sh"
+fi
+
 # ── Waybar HyDE off (une seule barre : Quickshell) ────────────────────────────
 if [[ -x "$SCRIPT_DIR/disable-waybar.sh" ]]; then
     info "Désactivation waybar HyDE (évite double barre avec Quickshell)..."

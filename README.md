@@ -53,6 +53,18 @@ install-wpe-manager.sh     ← Installation complète WPE (Wallpaper Engine)
 
 ---
 
+## Steam + GPU AMD (crash silencieux)
+
+Script dédié : active **[multilib]**, installe **mesa / lib32-mesa**, **vulkan-radeon** (32+64 bits), **steam**, outils de diag, et un lanceur **`~/.local/bin/steam-amd`** qui journalise dans `~/.local/share/Steam-amd-launch.log`.
+
+```bash
+bash install-steam-amd-arch.sh
+bash install-steam-amd-arch.sh --diagnose-only   # sans rien installer
+bash install-steam-amd-arch.sh --non-interactive # CI / sans questions
+```
+
+---
+
 ## WPE Manager (Wallpaper Engine)
 
 Installe les paquets (Python, Electron, mpvpaper, GTK/WebKit pour les fonds HTML), copie `apps/wpe-manager` vers `~/wpe-manager`, crée `~/.config/wallpaperengine_screens.conf`, le lanceur menu et vérifie le dossier Steam workshop.

@@ -2,20 +2,26 @@
 # =============================================================================
 # install-steam-amd-arch.sh — Steam sur Arch Linux + GPU AMD (Mesa / RADV)
 # =============================================================================
-# USAGE  : bash install-steam-amd-arch.sh [--diagnose-only] [--non-interactive]
-# Crash silencieux typique : [multilib] désactivé, lib32-mesa / Vulkan 32 bits
-# manquants, versions mesa / lib32-mesa désynchronisées, webhelper WebKit.
+# USAGE  : bash install-steam-amd-arch.sh [options]
+#   --diagnose-only      : rien n’installe
+#   --non-interactive    : pas de questions (multilib auto, pas gamemode)
+#   --with-aur-native    : tente yay/paru pour steam-native-runtime (AUR)
+# Crash silencieux typique : [multilib] désactivé, lib32-mesa / Vulkan 32 bits,
+# runtime Valve / pressure-vessel (bubblewrap, userns), libs mélangées, webhelper.
 # Doc Arch : https://wiki.archlinux.org/title/Steam
+# Runtime  : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime
 # =============================================================================
 
 [[ "$EUID" -eq 0 ]] && { echo "Ne pas lancer en root. Utilise ton utilisateur (sudo sera demandé)."; exit 1; }
 
 DIAG_ONLY=0
 NON_INTERACTIVE=0
+WITH_AUR_NATIVE=0
 for a in "$@"; do
     case "$a" in
         --diagnose-only) DIAG_ONLY=1 ;;
         --non-interactive) NON_INTERACTIVE=1 ;;
+        --with-aur-native) WITH_AUR_NATIVE=1 ;;
     esac
 done
 
@@ -81,6 +87,50 @@ _diagnose() {
             ls -lt "$d" 2>/dev/null | head -5
         fi
     done
+    echo ""
+    echo "--- Runtime Steam (répertoire scout / scripts) ---"
+    if [[ -d "$HOME/.steam/root/ubuntu12_32" ]]; then
+        ls "$HOME/.steam/root/ubuntu12_32"/steam-runtime* 2>/dev/null | head -3 || true
+        ls "$HOME/.steam/root/ubuntu12_32"/steam.sh 2>/dev/null || true
+    else
+        warn "~/.steam/root/ubuntu12_32 absent (Steam pas encore lancé ou install cassée)"
+    fi
+    echo ""
+    echo "--- pressure-vessel / conteneurs (user namespaces) ---"
+    if command -v bubblewrap &>/dev/null; then
+        ok "bubblewrap : $(command -v bubblewrap) ($(pacman -Q bubblewrap 2>/dev/null || echo '?'))"
+    else
+        warn "bubblewrap absent — installe le paquet bubblewrap (requis pour Steam Linux Runtime / Proton)"
+    fi
+    if [[ -r /proc/sys/kernel/unprivileged_userns_clone ]]; then
+        userns="$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo '?')"
+        if [[ "$userns" == "0" ]]; then
+            err "kernel.unprivileged_userns_clone=0 — pressure-vessel peut échouer (linux-hardened ?). Voir wiki Steam-runtime / bubblewrap-suid ou passer ce sysctl à 1."
+        else
+            ok "kernel.unprivileged_userns_clone=$userns"
+        fi
+    fi
+    if [[ "$(uname -r)" == *hardened* ]]; then
+        warn "Noyau « hardened » : vérifier bubblewrap + userns (doc steam-runtime Valve)"
+    fi
+    echo ""
+    echo "--- steam-native (contournement runtime système) ---"
+    if command -v steam-native &>/dev/null; then
+        ok "steam-native trouvé : $(command -v steam-native) (paquet steam-native-runtime AUR)"
+    else
+        info "Pas de steam-native — lanceur ~/.local/bin/steam-amd-native utilise STEAM_RUNTIME=0 (sans AUR si besoin)"
+    fi
+    echo ""
+    echo "--- Locale (évite erreurs invalid pointer) ---"
+    locale 2>/dev/null | grep -E 'LANG=|LC_' | head -5 || true
+    echo ""
+    echo "--- stdout Steam (wrapper Arch redirige vers /tmp/dumps) ---"
+    shopt -s nullglob
+    for f in /tmp/dumps/*_stdout.txt; do
+        echo ">>> $f (dernières lignes)"
+        tail -8 "$f" 2>/dev/null || true
+    done
+    shopt -u nullglob
 }
 
 if ! command -v pacman &>/dev/null; then
@@ -145,6 +195,7 @@ section "Paquets : firmware + Mesa/Vulkan AMD + Steam"
 # Le méta-paquet steam tire la plupart des lib32 ; on force l’empilement graphique AMD.
 CORE_PKGS=(
     linux-firmware
+    bubblewrap
     mesa
     lib32-mesa
     vulkan-radeon
@@ -159,6 +210,7 @@ EXTRA_PKGS=(
     lib32-vulkan-mesa-layers
     vulkan-tools
     lib32-mesa-utils
+    lib32-sdl2
 )
 
 info "Cœur : ${CORE_PKGS[*]}"
@@ -178,25 +230,52 @@ if [[ "$NON_INTERACTIVE" -ne 1 ]]; then
     fi
 fi
 
-# ── Lanceur avec journal (plus de crash « silencieux ») ───────────────────────
-section "Lanceur Steam (AMD) + fichier log"
+_aur_install_steam_native_runtime() {
+    if command -v paru &>/dev/null; then
+        paru -S --needed --noconfirm steam-native-runtime
+    elif command -v yay &>/dev/null; then
+        yay -S --needed --noconfirm steam-native-runtime
+    else
+        err "yay ou paru introuvable — installe steam-native-runtime depuis l’AUR à la main."
+        return 1
+    fi
+}
+
+if [[ "$WITH_AUR_NATIVE" -eq 1 ]]; then
+    section "AUR : steam-native-runtime (libs système à la place du runtime Valve)"
+    _aur_install_steam_native_runtime && ok "steam-native-runtime installé" || warn "Échec AUR — utilise steam-amd-native sans le méta-paquet AUR"
+elif [[ "$NON_INTERACTIVE" -ne 1 ]]; then
+    read -rp "$(echo -e "${BOLD}Installer steam-native-runtime depuis l’AUR (yay/paru) ? [o/N] ${NC}")" aurn
+    if [[ "$aurn" =~ ^[oOyY]$ ]]; then
+        section "AUR : steam-native-runtime"
+        _aur_install_steam_native_runtime && ok "steam-native-runtime installé" || warn "Échec AUR"
+    fi
+fi
+
+# ── Lanceurs + journal (plus de crash « silencieux ») ─────────────────────────
+section "Lanceurs Steam (AMD) + fichier log"
 
 LAUNCHER="$HOME/.local/bin/steam-amd"
+LAUNCHER_NATIVE="$HOME/.local/bin/steam-amd-native"
 mkdir -p "$HOME/.local/bin"
 cat > "$LAUNCHER" << 'STEAMLAUNCH'
 #!/usr/bin/env bash
-# Steam + AMD : WebKit sandbox et GPU web render souvent en cause si crash au boot.
+# Steam + AMD : wrapper Arch (/usr/bin/steam) + correctifs WebKit.
+# Si ça crash encore : essaie steam-amd-native (runtime désactivé) ou steam-native (AUR).
 # Log : ~/.local/share/Steam-amd-launch.log
 
 export STEAM_USE_WEBKIT_SANDBOX="${STEAM_USE_WEBKIT_SANDBOX:-0}"
 
-# Si Steam se ferme tout de suite, passe à 1 (décommente la ligne suivante) :
+# Crash webhelper / CEF au démarrage :
 # export STEAM_DISABLE_GPU_WEBRENDER=1
+
+# Rare : Mesa + pressure-vessel et GBM (voir steam-runtime#797) — décommente si erreur libgbm :
+# export GBM_BACKENDS_PATH="/usr/lib/gbm"
 
 LOG="$HOME/.local/share/Steam-amd-launch.log"
 mkdir -p "$(dirname "$LOG")"
 {
-    echo "======== $(date -Iseconds) ========"
+    echo "======== $(date -Iseconds) mode=runtime-valve-wrapper ========"
     echo "DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XDG_SESSION_TYPE=$XDG_SESSION_TYPE"
     echo "mesa: $(pacman -Q mesa lib32-mesa 2>/dev/null | tr '\n' ' ')"
     echo "-----"
@@ -207,13 +286,40 @@ STEAMLAUNCH
 chmod +x "$LAUNCHER"
 ok "$LAUNCHER"
 
+cat > "$LAUNCHER_NATIVE" << 'STEAMNAT'
+#!/usr/bin/env bash
+# Contournement « runtime Steam » : libs système (Arch) comme steam-native (AUR).
+# Arch Wiki : STEAM_RUNTIME=0 et -compat-force-slr off
+# Préfère steam-native si installé (steam-native-runtime AUR, ~130 deps).
+
+export STEAM_USE_WEBKIT_SANDBOX="${STEAM_USE_WEBKIT_SANDBOX:-0}"
+# export STEAM_DISABLE_GPU_WEBRENDER=1
+
+LOG="$HOME/.local/share/Steam-amd-native-launch.log"
+mkdir -p "$(dirname "$LOG")"
+{
+    echo "======== $(date -Iseconds) mode=native-runtime-off ========"
+    echo "DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+    echo "-----"
+} >>"$LOG"
+exec >>"$LOG" 2>&1
+
+if command -v steam-native &>/dev/null; then
+    exec steam-native "$@"
+fi
+export STEAM_RUNTIME=0
+exec /usr/bin/steam -compat-force-slr off "$@"
+STEAMNAT
+chmod +x "$LAUNCHER_NATIVE"
+ok "$LAUNCHER_NATIVE"
+
 APP_DIR="$HOME/.local/share/applications"
 mkdir -p "$APP_DIR"
 cat > "$APP_DIR/steam-amd.desktop" << DESKEOF
 [Desktop Entry]
 Name=Steam (AMD — journal)
 Name[fr]=Steam (AMD — avec journal)
-Comment=Steam Mesa/RADV ; log dans ~/.local/share/Steam-amd-launch.log
+Comment=Steam Mesa/RADV ; runtime Valve + wrapper Arch ; log ~/.local/share/Steam-amd-launch.log
 Exec=$LAUNCHER %U
 Icon=steam
 Terminal=false
@@ -221,6 +327,19 @@ Type=Application
 Categories=Game;
 DESKEOF
 ok "$APP_DIR/steam-amd.desktop"
+
+cat > "$APP_DIR/steam-amd-native.desktop" << DESKEOF
+[Desktop Entry]
+Name=Steam (AMD — libs système)
+Name[fr]=Steam (AMD — runtime natif)
+Comment=STEAM_RUNTIME=0 / steam-native si AUR ; si le client crash avec le runtime Valve
+Exec=$LAUNCHER_NATIVE %U
+Icon=steam
+Terminal=false
+Type=Application
+Categories=Game;
+DESKEOF
+ok "$APP_DIR/steam-amd-native.desktop"
 command -v update-desktop-database &>/dev/null && update-desktop-database "$APP_DIR" 2>/dev/null || true
 
 section "Diagnostic rapide"
@@ -230,9 +349,12 @@ section "Résumé"
 ok "Terminé."
 echo ""
 echo -e "${BOLD}À faire${NC}"
-echo "  1. Terminal : ${CYAN}$LAUNCHER${NC}   (ou menu « Steam (AMD — journal) »)"
-echo "  2. Log      : ${CYAN}tail -f ~/.local/share/Steam-amd-launch.log${NC}"
-echo "  3. Si écran noir / fermeture : édite $LAUNCHER et active STEAM_DISABLE_GPU_WEBRENDER=1"
-echo "  4. Sync Mesa : ${CYAN}sudo pacman -Syu mesa lib32-mesa${NC} (même mise à jour)"
-echo "  5. Pilote noyau : AMDGPU (amdgpu), pas radeon legacy — voir lspci ci-dessus"
+echo "  1. D’abord : ${CYAN}$LAUNCHER${NC}   (wrapper Arch + runtime Valve)"
+echo "  2. Si crash / silence : ${CYAN}$LAUNCHER_NATIVE${NC}   (runtime désactivé, ou steam-native si AUR)"
+echo "  3. Logs     : ${CYAN}tail -f ~/.local/share/Steam-amd-launch.log${NC} et Steam-amd-native-launch.log"
+echo "  4. Autre log client : ${CYAN}/tmp/dumps/*_stdout.txt${NC}"
+echo "  5. Web / CEF : édite le lanceur et STEAM_DISABLE_GPU_WEBRENDER=1"
+echo "  6. pressure-vessel : ${CYAN}sysctl kernel.unprivileged_userns_clone${NC} doit être 1 (sauf config explicite) ; paquet bubblewrap installé"
+echo "  7. Sync Mesa : ${CYAN}sudo pacman -Syu mesa lib32-mesa${NC}"
+echo "  8. Doc runtime : https://wiki.archlinux.org/title/Steam/Troubleshooting#Steam_runtime"
 echo ""

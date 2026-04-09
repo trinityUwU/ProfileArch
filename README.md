@@ -55,13 +55,19 @@ install-wpe-manager.sh     ← Installation complète WPE (Wallpaper Engine)
 
 ## Steam + GPU AMD (crash silencieux)
 
-Script dédié : active **[multilib]**, installe **mesa / lib32-mesa**, **vulkan-radeon** (32+64 bits), **steam**, outils de diag, et un lanceur **`~/.local/bin/steam-amd`** qui journalise dans `~/.local/share/Steam-amd-launch.log`.
+Script dédié : active **[multilib]**, installe **mesa / lib32-mesa**, **vulkan-radeon** (32+64 bits), **bubblewrap**, **steam**, couches Vulkan/SDL2 utiles, diagnostics **runtime / pressure-vessel** (user namespaces), et deux lanceurs :
+
+- **`~/.local/bin/steam-amd`** — wrapper Arch (`/usr/bin/steam`) + runtime Valve (comportement par défaut recommandé par le wiki).
+- **`~/.local/bin/steam-amd-native`** — **`STEAM_RUNTIME=0`** et **`-compat-force-slr off`** (comme [steam-native-runtime](https://aur.archlinux.org/packages/steam-native-runtime/) AUR) si le client plante à cause du runtime / libs mélangées.
 
 ```bash
 bash install-steam-amd-arch.sh
-bash install-steam-amd-arch.sh --diagnose-only   # sans rien installer
-bash install-steam-amd-arch.sh --non-interactive # CI / sans questions
+bash install-steam-amd-arch.sh --diagnose-only    # sans rien installer
+bash install-steam-amd-arch.sh --non-interactive  # CI / sans questions
+bash install-steam-amd-arch.sh --with-aur-native  # + steam-native-runtime (yay/paru)
 ```
+
+Journaux : `~/.local/share/Steam-amd-launch.log`, `Steam-amd-native-launch.log`, et `/tmp/dumps/*_stdout.txt` (sortie du client).
 
 ---
 
